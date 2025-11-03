@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Cricket Globe/Map + Leaderboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="styles.css" />
-  <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script src="https://unpkg.com/topojson-client@3"></script>
+    <meta charset="utf-8" />
+    <title>Cricket Globe/Map + Leaderboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
 </head>
 <body>
   <!-- Full-viewport canvas -->
@@ -34,6 +34,14 @@
     <section id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0" aria-live="polite"></section>
   </aside>
 
+  <!-- sql.js (SQLite in WASM) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+
+  <!-- DB helper (you create this file) -->
+  <script src="db.js"></script>
+
+  <!-- Your existing map code -->
   <script src="map.js"></script>
+
 </body>
 </html>

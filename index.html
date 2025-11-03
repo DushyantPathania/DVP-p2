@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Cricket Globe/Map + Leaderboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+</head>
+<body>
+  <!-- Full-viewport canvas -->
+  <div id="globe" aria-label="Interactive globe/map"></div>
+
+  <!-- Three-line button (top-right) -->
+  <button id="menuBtn" class="hamburger" aria-expanded="false" aria-controls="leaderboardOverlay" aria-label="Open leaderboard">
+    <span></span><span></span><span></span>
+  </button>
+
+  <!-- Backdrop + centered overlay (~89%) -->
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <aside id="leaderboardOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="lbTitle" hidden>
+    <header class="overlay-header">
+      <h2 id="lbTitle">Leaderboard</h2>
+      <button id="closeOverlay" class="icon-btn" aria-label="Close leaderboard">✕</button>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Leaderboard tabs">
+      <button id="tab-batting" class="tab active" role="tab" aria-selected="true"  aria-controls="tabpanel" data-kind="batting">Batting</button>
+      <button id="tab-bowling" class="tab"        role="tab" aria-selected="false" aria-controls="tabpanel" data-kind="bowling">Bowling</button>
+    </nav>
+
+    <section id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0" aria-live="polite"></section>
+  </aside>
+
+  <script src="map.js"></script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+/* Fullscreen, no scroll */
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  overscroll-behavior: none;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif;
+  background:
+    radial-gradient(900px 600px at 12% 10%, rgba(255,255,255,0.06), transparent 60%),
+    radial-gradient(900px 600px at 88% 90%, rgba(255,255,255,0.045), transparent 60%),
+    linear-gradient(180deg, #071b12 0%, #05140e 100%);
+}
+
+/* Cricket palette */
+:root{
+  --ocean: #0a3a2a;
+  --ocean-stroke: #06281e;
+
+  --land: #f5f0e6;
+  --land-stroke: #1e6d4e;
+
+  --graticule: #2c7a5b;
+  --boundary-stroke: rgba(17, 80, 56, 0.65);
+
+  --hover-fill: #fff7e0;
+  --hover-stroke: #c1121f;
+  --hover-shadow: rgba(193, 18, 31, 0.45);
+
+  /* Overlay UI */
+  --panel-bg: rgba(6, 29, 22, 0.95);
+  --panel-border: rgba(255,255,255,0.15);
+  --text: #e7f6ef;
+  --muted: #bcd8cd;
+  --accent: #24b47e;
+}
+
+/* Canvas */
+#globe { width: 100vw; height: 100vh; cursor: grab; }
+#globe:active { cursor: grabbing; }
+#globe, #globe svg { touch-action: none; }
+svg { width: 100%; height: 100%; display: block; }
+
+/* Map layers */
+.sphere   { fill: var(--ocean); stroke: var(--ocean-stroke); stroke-width: 1px; }
+.graticule{ fill: none; stroke: var(--graticule); stroke-opacity: 0.55; stroke-width: 0.5px; pointer-events: none; }
+.boundary { fill: none; stroke: var(--boundary-stroke); stroke-width: 0.5px; pointer-events: none; }
+
+.country {
+  fill: var(--land); stroke: var(--land-stroke); stroke-width: 0.6px; pointer-events: all;
+  transition: transform 140ms ease, fill 140ms ease, stroke 140ms ease,
+              stroke-width 140ms ease, filter 140ms ease;
+}
+.country.hovered {
+  fill: var(--hover-fill); stroke: var(--hover-stroke); stroke-width: 1.1px;
+  filter: drop-shadow(0 0 6px var(--hover-shadow));
+}
+
+/* Hamburger (top-right) */
+.hamburger {
+  position: fixed; right: 16px; top: 16px; width: 44px; height: 44px; border-radius: 10px;
+  display: grid; place-items: center; background: #134e4a; border: 1px solid rgba(255,255,255,0.2);
+  cursor: pointer; z-index: 7;
+}
+.hamburger span {
+  display: block; width: 22px; height: 2px; background: var(--text);
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+.hamburger span + span { margin-top: 5px; }
+.hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.hamburger.open span:nth-child(2) { opacity: 0; }
+.hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* Backdrop + Overlay (~89%) */
+.backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.28); z-index: 6;
+  opacity: 0; transition: opacity 180ms ease;
+}
+.backdrop.open { opacity: 1; }
+
+.overlay {
+  position: fixed; top: 50%; left: 50%;
+  width: 89vw; height: 89vh; max-width: 1400px; max-height: 92vh;
+  transform: translate(-50%, -50%) scale(0.98);
+  background: var(--panel-bg); color: var(--text);
+  border: 1px solid var(--panel-border); border-radius: 16px;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+  display: grid; grid-template-rows: auto auto 1fr;
+  z-index: 7; opacity: 0; pointer-events: none;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+.overlay.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+
+.overlay-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--panel-border);
+}
+.icon-btn {
+  background: transparent; color: var(--text); border: 1px solid var(--panel-border);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer;
+}
+.icon-btn:hover { filter: brightness(1.1); }
+
+/* Tabs */
+.tabs {
+  display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--panel-border);
+}
+.tab {
+  padding: 8px 12px; border-radius: 10px; background: #0f3b2e; color: var(--text);
+  border: 1px solid var(--panel-border); cursor: pointer; font-weight: 600;
+}
+.tab.active, .tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+
+/* Table area */
+.tab-panel {
+  padding: 10px 12px 16px; overflow: auto;
+}
+.lb-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.lb-table th, .lb-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.lb-table th { color: var(--muted); font-weight: 600; }
+.lb-table tr:nth-child(1) td { font-weight: 700; color: #ffe082; }
+.lb-meta { color: var(--muted); font-size: 0.85rem; }
+
+/* Venue markers (SVG <image>) */
+.venue-icon {
+  pointer-events: auto;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 120ms ease, opacity 120ms ease;
+  cursor: pointer;
+}
+.venue-icon:hover {
+  transform: scale(1.12);
+}

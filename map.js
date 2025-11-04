@@ -1,39 +1,20 @@
 /* ============================================================================
    Cricket-themed Globe <-> Map (D3 v7)
-   - Venues loaded from SQLite (sql.js) via db.js (works from file://)
-   - Smooth globe spin, drag, zoom; hover highlight/pop for countries
-   - D3-drawn toggle (3D globe <-> 2D map)
-   - 89% overlay leaderboard (hamburger button)
-   - Admin-1 (state/province) borders appear at higher zoom levels
-   - Minimal dependencies in HTML:
-       <script src="https://d3js.org/d3.v7.min.js"></script>
-       <script src="https://unpkg.com/topojson-client@3"></script>
-       <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
-       <script src="db.js"></script>
-       <script src="map.js"></script>
+   - Venues from SQLite (sql.js) via db.js (works from file://)
+   - Smooth globe spin; pauses when a venue/country is focused or venue window is open
+   - NEW: Custom dual year slider (2000–2025) — fully custom thumbs & pointer logic
+   - Drag to rotate (3D), wheel/touch zoom; hover highlight/pop for countries
+   - D3-drawn toggle (3D globe <-> 2D map); 89% overlay leaderboard
    ============================================================================ */
 
 (async function () {
   /* ----------------------------- Config ----------------------------------- */
-
-  // SQLite DB hosted via jsDelivr (CORS ok). Update if you pin to a commit.
-  const DB_URL = "https://cdn.jsdelivr.net/gh/DushyantPathania/DVP-p2@main/data/db/cricket.db";
-
-  // Stadium icon (relative to index.html)
-  const ICON_PATH  = "data/icon/CricketStadium.png";
-
-  // Icon base size (px) at globe zoom k = 1
-  const ICON_BASE = 22;
-
-  // Globe spin speed (deg/sec)
+  const DB_URL    = "https://cdn.jsdelivr.net/gh/DushyantPathania/DVP-p2@main/data/db/cricket.db";
+  const ICON_PATH = "data/icon/CricketStadium.png";
+  const ICON_BASE = 14;
   const SPIN_DEG_PER_SEC = 3;
 
-  // Zoom thresholds for revealing admin-1 borders
-  const ADMIN_SHOW_ZOOM_GLOBE = 1.6;  // globe zoom k >= this shows state borders
-  const ADMIN_SHOW_ZOOM_MAP   = 2.2;  // map   zoom k >= this shows state borders
-
   /* ------------------------------ DOM ------------------------------------- */
-
   const container = document.getElementById("globe");
   const btnMenu   = document.getElementById("menuBtn");
   const overlay   = document.getElementById("leaderboardOverlay");
@@ -42,59 +23,51 @@
   const tabPanel  = document.getElementById("tabpanel");
   const tabBtns   = [document.getElementById("tab-batting"), document.getElementById("tab-bowling")];
 
+  /* Slider root (custom) */
+  const sliderRoot = document.getElementById("yearSlider");
+
   /* --------------------------- SVG & Layers -------------------------------- */
-
   const svg = d3.select(container).append("svg");
-
-  // Geography inside gRoot (so 2D mode can pan/zoom entire group)
   const gRoot      = svg.append("g");
   const gSphere    = gRoot.append("g");
   const gGraticule = gRoot.append("g");
   const gCountries = gRoot.append("g");
   const gBoundary  = gRoot.append("g");
-  const gAdmin1    = gRoot.append("g").attr("class", "admin1"); // state/province borders
-  const gVenues    = gRoot.append("g").attr("class", "venues"); // stadium icons
-
-  // Fixed-position UI layer (not transformed by zoom/pan)
-  const gUI = svg.append("g").attr("class", "ui-layer");
+  const gVenues    = gRoot.append("g").attr("class", "venues");
+  const gUI        = svg.append("g").attr("class", "ui-layer");
 
   /* -------------------------- Projections/Path ----------------------------- */
-
   const graticule = d3.geoGraticule10();
-
-  // 3D globe projection (orthographic)
   const globeProj = d3.geoOrthographic().precision(0.6).clipAngle(90);
-
-  // 2D map projection (Natural Earth)
   const mapProj   = d3.geoNaturalEarth1().precision(0.6);
 
-  // Active projection + path generator
   let projection = globeProj;
   let path       = d3.geoPath(projection);
 
   /* ----------------------------- State ------------------------------------ */
-
-  let mode        = "globe";   // "globe" | "map"
-  let baseScale   = 1;         // base globe radius (px)
-  let globeZoomK  = 1;         // current globe zoom factor
-  let mapZoomK    = 1;         // current 2D zoom factor
+  let mode        = "globe";
+  let baseScale   = 1;
+  let globeZoomK  = 1;
   let isDragging  = false;
-  let prev        = null;      // last drag [x, y]
+  let prev        = null;
   const dragSens  = 0.25;
 
-  // Spin timer
+  // Spin
   const spinDegPerMs = SPIN_DEG_PER_SEC / 1000;
   let spinTimer   = null;
   let lastElapsed = null;
 
-  // Hovered country id (to apply the pop transform)
-  let hoveredId   = null;
+  // Hover/focus
+  let hoveredId         = null;
+  let focusedCountryId  = null;
 
-  // Venues from DB: [{venue, longitude, latitude}]
-  let venues      = [];
+  // Venues
+  let venues = [];
+
+  // Year range (global)
+  let yearRange = { min: 2000, max: 2025 };
 
   /* ------------------------ Demo Leaderboard Data -------------------------- */
-  // Replace with DB-driven data later if you want.
   const battingData = [
     { player: "Player A", team: "IND", runs: 945, sr: 142.3, avg: 52.5 },
     { player: "Player B", team: "AUS", runs: 903, sr: 136.4, avg: 48.2 },
@@ -121,27 +94,18 @@
   ];
 
   /* ----------------------------- World Data -------------------------------- */
-
-  // Countries + boundaries (TopoJSON -> GeoJSON)
-  const worldData    = await d3.json("https://unpkg.com/world-atlas@2/countries-110m.json");
+  const worldData    = await d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json");
   const countries    = topojson.feature(worldData, worldData.objects.countries).features;
   const boundaryMesh = topojson.mesh(worldData, worldData.objects.countries, (a, b) => a !== b);
 
-  // Admin-1 (state/province) mesh (10m for detail). Some regions may be sparse.
-  const statesData   = await d3.json("https://unpkg.com/world-atlas@2/states-10m.json");
-  const adminMesh    = topojson.mesh(statesData, statesData.objects.states, (a, b) => a !== b);
-
   /* ---------------------------- Geography ---------------------------------- */
-
   function drawStaticLayers() {
-    // Ocean sphere
     gSphere.selectAll("path.sphere")
       .data([{ type: "Sphere" }])
       .join("path")
       .attr("class", "sphere")
       .attr("d", path);
 
-    // Graticule (lat/long grid)
     gGraticule.selectAll("path.graticule")
       .data([graticule])
       .join("path")
@@ -150,23 +114,21 @@
   }
 
   function drawCountries() {
-    // Country polygons (with hover interactions)
     gCountries.selectAll("path.country")
       .data(countries, d => d.id)
       .join("path")
       .attr("class", "country")
-      .on("mouseenter", (event, d) => {
-        hoveredId = d.id;
-        d3.select(event.currentTarget).raise();
+      .on("mouseenter", (event, d) => { hoveredId = d.id; d3.select(event.currentTarget).raise(); updateHoverTransform(); })
+      .on("mouseleave", () => { hoveredId = null; updateHoverTransform(); })
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        focusedCountryId = (focusedCountryId === d.id) ? null : d.id;
+        if (VenueWindow.isOpen && VenueWindow.isOpen()) VenueWindow.close();
         updateHoverTransform();
-      })
-      .on("mouseleave", () => {
-        hoveredId = null;
-        updateHoverTransform();
+        updateSpinState();
       })
       .attr("d", path);
 
-    // Country boundaries (thin strokes between countries)
     gBoundary.selectAll("path.boundary")
       .data([boundaryMesh])
       .join("path")
@@ -174,29 +136,12 @@
       .attr("d", path);
   }
 
-  // Admin-1 borders as a single mesh path (fast)
-  function drawAdminBoundaries() {
-    gAdmin1.selectAll("path.admin1")
-      .data([adminMesh])
-      .join("path")
-      .attr("class", "admin1")
-      .attr("d", path)
-      .attr("fill", "none")
-      .attr("stroke", "rgba(255,255,255,0.22)")
-      .attr("stroke-width", 0.6)
-      .attr("vector-effect", "non-scaling-stroke")
-      .attr("pointer-events", "none");
-  }
-
   /* ----------------------------- Venues (DB) ------------------------------- */
-
-  // Load venues from SQLite (via db.js). Expected table: venues(venue, longitude, latitude)
   async function loadVenuesFromDB() {
-    await DB.init(DB_URL);           // opens cricket.db using sql.js
-    venues = await DB.getVenues();   // [{ venue, longitude, latitude }]
+    await DB.init(DB_URL);
+    venues = await DB.getVenues();
   }
 
-  // Create <image> markers once; then position on projection updates
   function drawVenues() {
     if (!venues.length) return;
 
@@ -212,19 +157,26 @@
       .attr("opacity", 0.95);
 
     enter.append("title").text(d => d.venue);
-
     sel.exit().remove();
+
+    gVenues.selectAll("image.venue-icon")
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        focusedCountryId = null;
+        VenueWindow.open(d);
+        updateHoverTransform();
+        updateSpinState();
+      });
 
     updateVenues();
   }
 
-  // Position icons using current projection & zoom; hide on back hemisphere in globe mode
   function updateVenues() {
     if (!venues.length) return;
 
     gVenues.selectAll("image.venue-icon").each(function (d) {
       const lon = +d.longitude, lat = +d.latitude;
-      const p   = projection([lon, lat]); // [x, y]
+      const p   = projection([lon, lat]);
       if (!p) return;
 
       const size = (mode === "globe") ? ICON_BASE * globeZoomK : ICON_BASE;
@@ -245,21 +197,182 @@
     });
   }
 
-  /* ---------------------------- Redraw Cycle -------------------------------- */
+  /* ----------------------- Custom Year Slider (from scratch) --------------- */
+  const YearSlider = (() => {
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-  // Recompute all paths, apply hover “pop”, update venues & admin-1 visibility
+    function create({ root, min = 2000, max = 2025, step = 1, onChange }) {
+      if (!root) return null;
+      const wrap   = root.querySelector(".slider-wrap");
+      const track  = wrap.querySelector(".track");
+      const rangeH = wrap.querySelector(".range-highlight");
+      const tMin   = wrap.querySelector(".thumb.min");
+      const tMax   = wrap.querySelector(".thumb.max");
+      const tipMin = wrap.querySelector(".thumb-tip.min");
+      const tipMax = wrap.querySelector(".thumb-tip.max");
+      const ticksC = wrap.querySelector(".ticks");
+      const labMin = root.querySelector("#yearMinLabel");
+      const labMax = root.querySelector("#yearMaxLabel");
+
+      // Build ticks (every 5 years)
+      if (ticksC && !ticksC.hasChildNodes()) {
+        for (let y = min; y <= max; y += 5) {
+          const tick = document.createElement("div");
+          tick.className = "tick";
+          const pct = ((y - min) / (max - min)) * 100;
+          tick.style.left = `${pct}%`;
+          const label = document.createElement("label");
+          label.textContent = y;
+          tick.appendChild(label);
+          ticksC.appendChild(tick);
+        }
+      }
+
+      let vMin = min, vMax = max;           // current values
+      let active = null;                     // 'min' | 'max' | null
+      let rect = wrap.getBoundingClientRect();
+
+      function valueToPct(val) { return ((val - min) / (max - min)) * 100; }
+      function pctToValue(pct) {
+        const v = min + (pct / 100) * (max - min);
+        return Math.round(v / step) * step;
+      }
+      function xToValue(clientX) {
+        rect = wrap.getBoundingClientRect();
+        const pct = clamp(((clientX - rect.left) / rect.width) * 100, 0, 100);
+        return pctToValue(pct);
+      }
+
+      function layout() {
+        // positions
+        const lp = valueToPct(vMin);
+        const rp = valueToPct(vMax);
+        tMin.style.left = `${lp}%`;
+        tMax.style.left = `${rp}%`;
+        tipMin.style.left = `${lp}%`;
+        tipMax.style.left = `${rp}%`;
+        rangeH.style.left = `${lp}%`;
+        rangeH.style.width = `${rp - lp}%`;
+
+        // labels + aria
+        labMin.textContent = `${vMin}`;
+        labMax.textContent = `${vMax}`;
+        tMin.setAttribute("aria-valuemin", String(min));
+        tMin.setAttribute("aria-valuemax", String(max));
+        tMax.setAttribute("aria-valuemin", String(min));
+        tMax.setAttribute("aria-valuemax", String(max));
+        tMin.setAttribute("aria-valuenow", String(vMin));
+        tMax.setAttribute("aria-valuenow", String(vMax));
+
+        tipMin.textContent = `${vMin}`;
+        tipMax.textContent = `${vMax}`;
+      }
+
+      function emit() {
+        onChange && onChange({ min: vMin, max: vMax });
+      }
+
+      function setValues(a, b, cause = "program") {
+        // keep invariant a <= b, and if crossing while dragging, swap active thumb
+        if (a > b) { [a, b] = [b, a]; if (active === "min") active = "max"; else if (active === "max") active = "min"; }
+        vMin = clamp(a, min, max);
+        vMax = clamp(b, min, max);
+        layout();
+        emit();
+      }
+
+      // Decide which thumb is closer to an X
+      function nearestThumbByX(clientX) {
+        const val = xToValue(clientX);
+        const dMin = Math.abs(val - vMin);
+        const dMax = Math.abs(val - vMax);
+        return (dMin <= dMax) ? "min" : "max";
+      }
+
+      // Pointer handlers
+      function startDrag(which, clientX) {
+        active = which;
+        wrap.setPointerCapture && wrap.setPointerCapture((event?.pointerId) ?? 1);
+        // immediately update on press at current pointer
+        const v = xToValue(clientX);
+        if (active === "min") setValues(v, vMax, "drag-start");
+        else setValues(vMin, v, "drag-start");
+      }
+      function moveDrag(clientX) {
+        if (!active) return;
+        const v = xToValue(clientX);
+        if (active === "min") setValues(v, vMax, "drag");
+        else setValues(vMin, v, "drag");
+      }
+      function endDrag() { active = null; }
+
+      // Events
+      const onPointerDown = (e) => {
+        e.stopPropagation(); // don't rotate globe
+        const target = e.target;
+        if (target === tMin) { startDrag("min", e.clientX); return; }
+        if (target === tMax) { startDrag("max", e.clientX); return; }
+        // clicked on track: choose nearest thumb, jump & drag
+        const which = nearestThumbByX(e.clientX);
+        startDrag(which, e.clientX);
+      };
+      const onPointerMove = (e) => { if (active) moveDrag(e.clientX); };
+      const onPointerUp   = (e) => { endDrag(); };
+
+      wrap.addEventListener("pointerdown", onPointerDown);
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+
+      // Keyboard support
+      function keyStep(e, which) {
+        const big = 5; // page up/down = 5 years
+        if (which === "min") {
+          if (e.key === "ArrowLeft") setValues(vMin - step, vMax, "key");
+          if (e.key === "ArrowRight") setValues(vMin + step, vMax, "key");
+          if (e.key === "PageDown") setValues(vMin - big, vMax, "key");
+          if (e.key === "PageUp")   setValues(vMin + big, vMax, "key");
+          if (e.key === "Home")     setValues(min, vMax, "key");
+          if (e.key === "End")      setValues(vMax, vMax, "key");
+        } else {
+          if (e.key === "ArrowLeft") setValues(vMin, vMax - step, "key");
+          if (e.key === "ArrowRight") setValues(vMin, vMax + step, "key");
+          if (e.key === "PageDown") setValues(vMin, vMax - big, "key");
+          if (e.key === "PageUp")   setValues(vMin, vMax + big, "key");
+          if (e.key === "Home")     setValues(vMin, vMin, "key");
+          if (e.key === "End")      setValues(vMin, max, "key");
+        }
+      }
+      tMin.addEventListener("keydown", (e) => keyStep(e, "min"));
+      tMax.addEventListener("keydown", (e) => keyStep(e, "max"));
+
+      // Keep geometry fresh
+      window.addEventListener("resize", () => { rect = wrap.getBoundingClientRect(); layout(); });
+
+      // Init
+      setValues(vMin, vMax, "init");
+      return {
+        get values() { return { min: vMin, max: vMax }; },
+        set values({ min: a, max: b }) { setValues(a, b, "program"); }
+      };
+    }
+
+    return { create };
+  })();
+
+  /* ---------------------------- Redraw Cycle -------------------------------- */
   function redrawAll() {
     gRoot.selectAll("path").attr("d", path);
     updateHoverTransform();
     updateVenues();
-    updateDetailVisibility();
+    VenueWindow.reposition && VenueWindow.reposition();
+    updateSpinState();
   }
 
-  // Subtle hover “pop” on countries using CSS transform around centroid
   function updateHoverTransform() {
     gCountries.selectAll("path.country").each(function (d) {
       const sel = d3.select(this);
-      if (hoveredId && d.id === hoveredId) {
+      const active = (hoveredId && d.id === hoveredId) || (focusedCountryId && d.id === focusedCountryId);
+      if (active) {
         const [cx, cy] = path.centroid(d);
         sel.classed("hovered", true)
            .style("transform", `translate(${cx}px, ${cy}px) scale(1.025) translate(${-cx}px, ${-cy}px)`);
@@ -269,37 +382,31 @@
     });
   }
 
-  // Show/hide admin-1 borders depending on zoom & mode
-  function updateDetailVisibility() {
-    const show = (mode === "map")
-      ? (mapZoomK   >= ADMIN_SHOW_ZOOM_MAP)
-      : (globeZoomK >= ADMIN_SHOW_ZOOM_GLOBE);
-    gAdmin1.style("opacity", show ? 1 : 0);
-  }
-
   /* ------------------------------ Spin ------------------------------------- */
-
   function startSpin() {
-    stopSpin();
+    if (mode !== "globe" || spinTimer) return;
     lastElapsed = null;
     spinTimer = d3.timer((elapsed) => {
       if (mode !== "globe" || isDragging) { lastElapsed = elapsed; return; }
       if (lastElapsed == null) lastElapsed = elapsed;
       const dt = elapsed - lastElapsed; lastElapsed = elapsed;
       const r = projection.rotate();
-      r[0] += spinDegPerMs * dt;         // spin around vertical axis
+      r[0] += spinDegPerMs * dt;
       projection.rotate(r);
-      redrawAll();
+      gRoot.selectAll("path").attr("d", path);
+      updateVenues();
+      VenueWindow.reposition && VenueWindow.reposition();
     });
   }
-
-  function stopSpin() {
-    if (spinTimer) { spinTimer.stop(); spinTimer = null; }
+  function stopSpin() { if (spinTimer) { spinTimer.stop(); spinTimer = null; } }
+  function updateSpinState() {
+    if (mode !== "globe") { stopSpin(); return; }
+    const venueOpen = VenueWindow.isOpen && VenueWindow.isOpen();
+    const somethingFocused = venueOpen || focusedCountryId !== null || isDragging;
+    if (somethingFocused) stopSpin(); else startSpin();
   }
 
   /* --------------------------- Interactions -------------------------------- */
-
-  // Drag globe to rotate (3D)
   const dragGlobe = d3.drag()
     .on("start", (event) => { isDragging = true; stopSpin(); prev = [event.x, event.y]; })
     .on("drag",  (event) => {
@@ -312,9 +419,8 @@
       prev = [event.x, event.y];
       redrawAll();
     })
-    .on("end",   () => { isDragging = false; prev = null; startSpin(); });
+    .on("end",   () => { isDragging = false; prev = null; updateSpinState(); });
 
-  // Zoom: globe (scale radius) vs map (transform group)
   const zoomGlobe = d3.zoom()
     .scaleExtent([0.7, 8])
     .filter((event) => event.type === "wheel" || event.type === "touchstart")
@@ -322,22 +428,30 @@
       globeZoomK = event.transform.k;
       projection.scale(baseScale * globeZoomK);
       redrawAll();
-      updateDetailVisibility();
     });
 
   const zoomMap = d3.zoom()
     .scaleExtent([1, 8])
     .on("zoom", (event) => {
-      mapZoomK = event.transform.k;
-      gRoot.attr("transform", event.transform);  // pan/zoom whole geography
-      updateDetailVisibility();
-      // paths don't need recomputing in 2D; the group transform handles it
+      gRoot.attr("transform", event.transform);
+      VenueWindow.reposition && VenueWindow.reposition();
     });
 
-  /* ----------------------------- Mode Toggle --------------------------------
-     D3-drawn switch (top-left): click/Enter/Space toggles 3D <-> 2D.
-  --------------------------------------------------------------------------- */
+  // Clear focus on background click
+  svg.on("pointerdown.clearFocus", (e) => {
+    const t = e.target;
+    const inside = t && (t.closest(".venues") || t.closest("path.country"));
+    if (inside) return;
+    focusedCountryId = null;
+    if (VenueWindow.isOpen && VenueWindow.isOpen()) VenueWindow.close();
+    updateHoverTransform();
+    updateSpinState();
+  });
 
+  window.addEventListener("venuewindow:open",  updateSpinState);
+  window.addEventListener("venuewindow:close", updateSpinState);
+
+  /* ----------------------------- Mode Toggle -------------------------------- */
   const TOGGLE = { w: 120, h: 36, r: 18, m: 16 };
   const ui = gUI.append("g")
     .attr("class", "mode-toggle")
@@ -381,7 +495,6 @@
     (animate ? knob.transition().duration(160) : knob).attr("cx", knobX());
   }
 
-  // Prevent interactions from leaking to the globe when toggling
   ["mousedown","touchstart","wheel"].forEach(ev =>
     ui.on(ev, (event) => event.stopPropagation(), true)
   );
@@ -396,13 +509,12 @@
   function setMode(newMode) {
     if (newMode === mode) return;
     mode = newMode;
-    gRoot.attr("transform", null); // clear any 2D transform
+    gRoot.attr("transform", null);
 
     if (mode === "map") {
       stopSpin();
       gRoot.on(".drag", null);
       svg.on(".zoom", null).call(zoomMap).call(zoomMap.transform, d3.zoomIdentity);
-      mapZoomK = 1;
       projection = mapProj; path.projection(projection);
       resize(); redrawAll();
     } else {
@@ -411,15 +523,13 @@
       gRoot.call(dragGlobe);
       projection = globeProj; path.projection(projection);
       resize(); redrawAll();
-      startSpin();
     }
 
     updateToggleUI(true);
-    updateDetailVisibility();
+    updateSpinState();
   }
 
   /* ------------------------------- Resize ---------------------------------- */
-
   function resize() {
     const width  = window.innerWidth;
     const height = window.innerHeight;
@@ -427,74 +537,51 @@
     svg.attr("width", width).attr("height", height);
 
     if (mode === "globe") {
-      // Fit a near-fullscreen globe
       const size = Math.min(width, height);
       baseScale = (size / 2) * 0.95;
-      projection
-        .translate([width / 2, height / 2])
-        .scale(baseScale * globeZoomK)
-        .clipAngle(90);
+      projection.translate([width / 2, height / 2]).scale(baseScale * globeZoomK).clipAngle(90);
     } else {
-      // Fit the 2D map nicely within the viewport
       const margin = 20;
       projection.fitExtent([[margin, margin], [width - margin, height - margin]], { type: "Sphere" });
     }
 
     positionToggle();
     redrawAll();
-    updateDetailVisibility();
   }
   window.addEventListener("resize", resize);
 
   /* ------------------------------- Reset ----------------------------------- */
-
-  // Double-click to reset view (center + zoom=1)
   svg.on("dblclick", () => {
     if (mode === "globe") {
       projection.rotate([0, 0, 0]);
       globeZoomK = 1;
-      svg.transition().duration(500)
-        .call(zoomGlobe.transform, d3.zoomIdentity)
-        .on("end", redrawAll);
+      svg.transition().duration(500).call(zoomGlobe.transform, d3.zoomIdentity).on("end", redrawAll);
     } else {
-      svg.transition().duration(400)
-        .call(zoomMap.transform, d3.zoomIdentity)
-        .on("end", () => gRoot.attr("transform", null));
-      mapZoomK = 1;
+      svg.transition().duration(400).call(zoomMap.transform, d3.zoomIdentity).on("end", () => gRoot.attr("transform", null));
     }
-    updateDetailVisibility();
   });
 
   /* --------------------------- Overlay (Leaderboard) ----------------------- */
-
   function openOverlay() {
     overlay.hidden = false; backdrop.hidden = false;
     overlay.classList.add("open"); backdrop.classList.add("open"); btnMenu.classList.add("open");
     btnMenu.setAttribute("aria-expanded", "true");
     overlay.setAttribute("aria-hidden", "false");
-    if (mode === "globe") stopSpin();
-    setActiveTab("batting");
     tabPanel.focus();
   }
-
   function closeOverlay() {
     overlay.classList.remove("open"); backdrop.classList.remove("open"); btnMenu.classList.remove("open");
     btnMenu.setAttribute("aria-expanded", "false");
     overlay.setAttribute("aria-hidden", "true");
     setTimeout(() => { overlay.hidden = true; backdrop.hidden = true; }, 180);
-    if (mode === "globe") startSpin();
   }
-
   function toggleOverlay() { if (overlay.hidden) openOverlay(); else closeOverlay(); }
-
   btnMenu.addEventListener("click", toggleOverlay);
   btnClose.addEventListener("click", closeOverlay);
   backdrop.addEventListener("click", closeOverlay);
   window.addEventListener("keydown", (e) => { if (e.key === "Escape" && !overlay.hidden) closeOverlay(); });
 
-  // Tabs
   tabBtns.forEach(btn => btn.addEventListener("click", () => setActiveTab(btn.dataset.kind)));
-
   function setActiveTab(kind) {
     tabBtns.forEach(b => {
       const on = b.dataset.kind === kind;
@@ -503,7 +590,6 @@
     });
     renderLeaderboard(kind);
   }
-
   function renderLeaderboard(kind = "batting") {
     const rows = (kind === "batting" ? battingData : bowlingData)
       .slice()
@@ -528,26 +614,38 @@
   }
 
   /* ------------------------------- Init ------------------------------------ */
+  // Venue window available globally from venue.js
+  VenueWindow.init({ svg, gRoot, projectionRef: () => projection, modeRef: () => mode });
 
-  resize();               // 1) size SVG
-  drawStaticLayers();     // 2) sphere + graticule
-  drawCountries();        // 3) country polygons + borders
-  drawAdminBoundaries();  // 4) admin-1 mesh (hidden until zoom threshold)
-  updateDetailVisibility();
+  // Create the year slider
+  const slider = YearSlider.create({
+    root: sliderRoot,
+    min: 2000,
+    max: 2025,
+    step: 1,
+    onChange: ({ min, max }) => {
+      yearRange = { min, max };
+      window.dispatchEvent(new CustomEvent("yearrange:change", { detail: yearRange }));
+      redrawAll();
+    }
+  });
 
-  await loadVenuesFromDB(); // 5) fetch venues from SQLite DB
+  // Map & data
+  resize();
+  drawStaticLayers();
+  drawCountries();
+  await loadVenuesFromDB();
   if (venues.length) drawVenues();
 
-  // 6) interactions (start in globe mode)
+  // interactions start in globe mode
   gRoot.call(dragGlobe);
   svg.call(zoomGlobe).call(zoomGlobe.transform, d3.zoomIdentity);
 
-  // 7) UI toggle + spin
+  // UI toggle + spin
   positionToggle();
   updateToggleUI(false);
-  startSpin();
+  updateSpinState();
 
   /* ------------------------------ Utils ------------------------------------ */
-
   function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 })();

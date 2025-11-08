@@ -1,9 +1,10 @@
-/* venue.js — venue window anchored near clicked venue
-   API: VenueWindow.init({ svg, gRoot, projectionRef, modeRef })
-        VenueWindow.open(d)
-        VenueWindow.close()
-        VenueWindow.reposition()
-        VenueWindow.isOpen()
+/* venue.js — anchored venue window with radar placeholder (no inline CSS)
+   API:
+     VenueWindow.init({ svg, gRoot, projectionRef, modeRef })
+     VenueWindow.open(d)
+     VenueWindow.close()
+     VenueWindow.reposition()
+     VenueWindow.isOpen()
 */
 (function () {
   const Z_INDEX = 20;
@@ -13,146 +14,74 @@
   let isOpenFlag = false;
   let currentDatum = null;
 
-  const F = {
-    panelBg: getComputedStyle(document.documentElement).getPropertyValue("--panel-bg") || "rgba(6,29,22,0.95)",
-    panelBorder: getComputedStyle(document.documentElement).getPropertyValue("--panel-border") || "rgba(255,255,255,0.15)",
-    text: getComputedStyle(document.documentElement).getPropertyValue("--text") || "#e7f6ef",
-    accent: getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#24b47e",
-    muted: getComputedStyle(document.documentElement).getPropertyValue("--muted") || "#bcd8cd",
-  };
-
+  // --------- DOM building (no inline styles; classes only) ----------
   function ensurePanel() {
     if (panel) return;
 
     panel = document.createElement("div");
     panel.id = "venue-window";
-    Object.assign(panel.style, {
-      position: "fixed",
-      zIndex: String(Z_INDEX),
-      left: "0px",
-      top: "0px",
-      width: "360px",
-      maxWidth: "min(92vw, 420px)",
-      minHeight: "200px",
-      display: "none",
-      background: F.panelBg,
-      color: F.text,
-      border: `1px solid ${F.panelBorder}`,
-      borderRadius: "12px",
-      boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
-      pointerEvents: "auto",
-      overflow: "hidden",
-    });
+    panel.className = "vw-panel";
+    panel.style.display = "none"; // visibility managed here, not in CSS to avoid initial flash
 
     // Header
     const header = document.createElement("div");
-    Object.assign(header.style, {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: "10px 12px",
-      borderBottom: `1px solid ${F.panelBorder}`,
-      gap: "8px",
-    });
+    header.className = "vw-header";
 
     const left = document.createElement("div");
-    Object.assign(left.style, { display: "flex", alignItems: "center", gap: "8px" });
+    left.className = "vw-left";
 
     titleEl = document.createElement("h3");
-    titleEl.className = "venue-title";
+    titleEl.className = "vw-title";
     titleEl.textContent = "Venue";
-    Object.assign(titleEl.style, {
-      margin: "0",
-      fontSize: "16px",
-      fontWeight: "700",
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-      whiteSpace: "nowrap",
-    });
 
     yearBadgeEl = document.createElement("span");
+    yearBadgeEl.className = "vw-year";
     yearBadgeEl.textContent = "2000–2025";
-    Object.assign(yearBadgeEl.style, {
-      fontSize: "12px",
-      padding: "2px 6px",
-      color: F.text,
-      border: `1px solid ${F.panelBorder}`,
-      borderRadius: "999px",
-      opacity: 0.85
-    });
 
     left.appendChild(titleEl);
     left.appendChild(yearBadgeEl);
 
     const closeBtn = document.createElement("button");
-    closeBtn.className = "venue-close";
+    closeBtn.className = "vw-close";
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.textContent = "×";
-    Object.assign(closeBtn.style, {
-      border: `1px solid ${F.panelBorder}`,
-      background: "transparent",
-      color: F.text,
-      borderRadius: "8px",
-      lineHeight: "1",
-      width: "28px",
-      height: "28px",
-      cursor: "pointer",
-      fontSize: "18px",
-    });
     closeBtn.addEventListener("click", close);
 
     header.appendChild(left);
     header.appendChild(closeBtn);
-    panel.appendChild(header);
 
     // Content
     const contentEl = document.createElement("div");
-    Object.assign(contentEl.style, {
-      padding: "10px 12px 12px",
-      display: "grid",
-      gridTemplateColumns: "1fr",
-      gap: "10px",
-      maxHeight: "60vh",
-      overflow: "auto",
-    });
+    contentEl.className = "vw-content";
 
+    // Radar placeholder
     const radarWrap = document.createElement("div");
-    radarWrap.innerHTML = `<svg width="280" height="170" data-role="radar"></svg>`;
+    radarWrap.className = "vw-radar";
+    radarWrap.innerHTML = `<svg class="vw-radar-svg" width="280" height="170" data-role="radar"></svg>`;
 
+    // Heatmap placeholder
     const heatWrap = document.createElement("div");
+    heatWrap.className = "vw-heat";
     heatWrap.textContent = "Heatmap (coming soon)";
-    Object.assign(heatWrap.style, {
-      display: "grid",
-      placeItems: "center",
-      height: "72px",
-      border: "1px dashed rgba(255,255,255,0.18)",
-      borderRadius: "10px",
-      color: F.muted,
-      fontSize: "0.9rem",
-    });
 
+    // Legend
     const legend = document.createElement("div");
+    legend.className = "vw-legend";
     legend.innerHTML = `
-      <div style="display:flex;gap:12px;align-items:center;font-size:0.92rem;">
-        <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#e6cf9a;margin-right:6px;"></i>Test</span>
-        <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#2dd4bf;margin-right:6px;"></i>ODI</span>
-        <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#a78bfa;margin-right:6px;"></i>T20I</span>
+      <div class="vw-legend-row">
+        <span><i class="dot test"></i>Test</span>
+        <span><i class="dot odi"></i>ODI</span>
+        <span><i class="dot t20i"></i>T20I</span>
       </div>
     `;
 
+    // Info
     const info = document.createElement("div");
+    info.className = "vw-info";
     info.innerHTML = `
-      <div style="display:grid;gap:6px;font-size:.95rem;">
-        <div style="display:flex;justify-content:space-between;gap:12px;">
-          <span style="color:${F.muted}">Country</span><span class="v-country">—</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;gap:12px;">
-          <span style="color:${F.muted}">City</span><span class="v-city">—</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;gap:12px;">
-          <span style="color:${F.muted}">Capacity</span><span class="v-capacity">—</span>
-        </div>
-      </div>
+      <div class="row"><span class="k">Country</span><span class="v v-country">—</span></div>
+      <div class="row"><span class="k">City</span><span class="v v-city">—</span></div>
+      <div class="row"><span class="k">Also known as</span><span class="v v-aka">—</span></div>
     `;
 
     contentEl.appendChild(radarWrap);
@@ -160,10 +89,11 @@
     contentEl.appendChild(legend);
     contentEl.appendChild(info);
 
+    panel.appendChild(header);
     panel.appendChild(contentEl);
     document.body.appendChild(panel);
 
-    // Keep open when interacting with the panel
+    // Keep open when interacting with panel
     panel.addEventListener("pointerdown", (e) => e.stopPropagation());
 
     // Outside click closes
@@ -175,13 +105,14 @@
     // ESC closes
     window.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
 
-    // Listen to global year range and show it on the badge
+    // Update badge when year range changes
     window.addEventListener("yearrange:change", (ev) => {
       const { min, max } = ev.detail || {};
       if (yearBadgeEl) yearBadgeEl.textContent = `${min}–${max}`;
     });
   }
 
+  // --------- Simple radar placeholder with D3 ----------
   function drawRadarPlaceholder(svgEl) {
     const svg = d3.select(svgEl);
     svg.selectAll("*").remove();
@@ -204,7 +135,7 @@
         .attr("y", Math.sin(angle) * (r + 6) + 4)
         .attr("text-anchor", Math.cos(angle) > 0.05 ? "start" : (Math.cos(angle) < -0.05 ? "end" : "middle"))
         .attr("font-size", 11)
-        .attr("fill", F.muted)
+        .attr("fill", "var(--muted)")
         .text(a);
     });
 
@@ -213,10 +144,19 @@
     });
 
     const vals = [0.6, 0.45, 0.7, 0.5, 0.8];
-    const line = d3.lineRadial().curve(d3.curveLinearClosed).radius(d => d * r).angle((d, i) => (i / n) * 2 * Math.PI);
-    g.append("path").datum(vals).attr("d", line).attr("fill", "rgba(36,180,126,0.25)").attr("stroke", F.accent);
+    const line = d3.lineRadial()
+      .curve(d3.curveLinearClosed)
+      .radius(d => d * r)
+      .angle((d, i) => (i / n) * 2 * Math.PI);
+
+    g.append("path")
+      .datum(vals)
+      .attr("d", line)
+      .attr("fill", "rgba(36,180,126,0.25)")
+      .attr("stroke", "var(--accent)");
   }
 
+  // --------- Positioning helpers ----------
   function screenPoint(lon, lat) {
     const proj = getProjection();
     let p = proj([+lon, +lat]);
@@ -235,40 +175,56 @@
     const x = bbox.left + sx;
     const y = bbox.top + sy;
 
-    const pad = 12;
+    // Make visible to measure
+    panel.style.visibility = "hidden";
+    panel.style.display = "block";
     const w = Math.min(panel.offsetWidth || 360, window.innerWidth - 24);
     const h = Math.min(panel.offsetHeight || 240, window.innerHeight - 24);
 
+    const pad = 12;
     let left = x + pad;
     let top  = y - h / 2;
-
     if (left + w + 10 > window.innerWidth) left = x - w - pad;
     top = clamp(top, 10, window.innerHeight - h - 10);
 
     panel.style.left = `${Math.round(left)}px`;
     panel.style.top  = `${Math.round(top)}px`;
+    panel.style.visibility = "visible";
   }
 
-  /* ------------------ Public API ------------------ */
+  // --------- Public API ----------
   function init({ svg, gRoot, projectionRef, modeRef }) {
     svgRef = svg; gRootRef = gRoot;
     getProjection = projectionRef;
     getMode = modeRef;
     ensurePanel();
+    if (window.yearRange && yearBadgeEl) {
+      yearBadgeEl.textContent = `${window.yearRange.min}–${window.yearRange.max}`;
+    }
   }
 
   function open(d) {
     ensurePanel();
     currentDatum = d;
-    isOpenFlag = true;
-    window.dispatchEvent(new CustomEvent("venuewindow:open"));
 
+    // Fill header + info
     titleEl.textContent = d.venue || "Venue";
-    const radarSvg = panel.querySelector('svg[data-role="radar"]');
-    if (radarSvg) drawRadarPlaceholder(radarSvg);
+    const countryEl = panel.querySelector(".v-country");
+    const cityEl    = panel.querySelector(".v-city");
+    const akaEl     = panel.querySelector(".v-aka");
+    if (countryEl) countryEl.textContent = d.country ?? "—";
+    if (cityEl)    cityEl.textContent    = d.city ?? "—";
+    if (akaEl)     akaEl.textContent     = d.names ?? "—";
 
+    // Radar
+    const radarSvg = panel.querySelector('svg[data-role="radar"]');
+    drawRadarPlaceholder(radarSvg);
+
+    // Show + position + notify
+    isOpenFlag = true;
     panel.style.display = "block";
     placeAtDatum(d);
+    window.dispatchEvent(new CustomEvent("venuewindow:open", { detail: { venue: d } }));
   }
 
   function close() {

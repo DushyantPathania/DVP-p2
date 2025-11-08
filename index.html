@@ -29,7 +29,7 @@
   <div id="backdrop" class="backdrop" hidden></div>
   <section id="leaderboardOverlay" class="overlay" aria-hidden="true" hidden>
     <header class="overlay-header">
-      <h2 style="margin:0;font-size:1rem;">Leaderboard</h2>
+      <h2 class="overlay-title">Leaderboard</h2>
       <button id="closeOverlay" class="icon-btn" aria-label="Close">Close</button>
     </header>
 
@@ -42,19 +42,19 @@
   </section>
 
   <!-- Year range slider (custom dual handle) -->
-    <div id="yearSlider" class="year-slider" role="group" aria-label="Filter by year range">
+  <div id="yearSlider" class="year-slider" role="group" aria-label="Filter by year range">
     <div class="year-labels">
-        <span id="yearMinLabel">2000</span>
-        <span id="yearMaxLabel">2025</span>
+      <span id="yearMinLabel">2000</span>
+      <span id="yearMaxLabel">2025</span>
     </div>
 
     <div class="slider-wrap">
-        <!-- rail + selected range -->
-        <div class="track"></div>
-        <div class="range-highlight"></div>
+      <!-- rail + selected range -->
+      <div class="track"></div>
+      <div class="range-highlight"></div>
 
-        <!-- thumbs (fully custom, draggable) -->
-        <div
+      <!-- thumbs (fully custom, draggable) -->
+      <div
         class="thumb min"
         tabindex="0"
         role="slider"
@@ -63,7 +63,7 @@
         aria-valuemax="2025"
         aria-valuenow="2000"></div>
 
-        <div
+      <div
         class="thumb max"
         tabindex="0"
         role="slider"
@@ -72,15 +72,13 @@
         aria-valuemax="2025"
         aria-valuenow="2025"></div>
 
-        <!-- live tooltips -->
-        <div class="thumb-tip min">2000</div>
-        <div class="thumb-tip max">2025</div>
+      <!-- live tooltips -->
+      <div class="thumb-tip min">2000</div>
+      <div class="thumb-tip max">2025</div>
 
-        <!-- ticks (JS fills every 5 yrs) -->
-        <div class="ticks"></div>
+      <!-- ticks (JS fills every 5 yrs) -->
+      <div class="ticks"></div>
     </div>
-    </div>
-
-</div>
+  </div>
 </body>
 </html>

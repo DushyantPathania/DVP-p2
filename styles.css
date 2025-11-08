@@ -146,6 +146,8 @@ svg { display: block; width: 100%; height: 100%; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid var(--panel-border);
 }
+.overlay-title { margin: 0; font-size: 1rem; }
+
 .icon-btn {
   padding: 6px 10px; color: var(--text); background: transparent;
   border: 1px solid var(--panel-border); border-radius: 8px; cursor: pointer;
@@ -178,7 +180,7 @@ svg { display: block; width: 100%; height: 100%; }
    ========================================================================== */
 .venue-icon {
   cursor: pointer; transform-box: fill-box; transform-origin: center;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
   transition: transform 120ms ease, opacity 120ms ease;
   pointer-events: auto;
 }
@@ -312,6 +314,74 @@ svg { display: block; width: 100%; height: 100%; }
   font-size: 10px; color: var(--muted);
 }
 
+/* ==========================================================================
+   Venue window (popup)
+   ========================================================================== */
+.vw-panel {
+  position: fixed;
+  z-index: 20;
+  left: 0;
+  top: 0;
+  width: 360px;
+  max-width: min(92vw, 420px);
+  min-height: 200px;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.vw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  gap: 8px;
+}
+.vw-left { display: flex; align-items: center; gap: 8px; }
+.vw-title { margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vw-year { font-size: 12px; padding: 2px 6px; border: 1px solid var(--panel-border); border-radius: 999px; opacity: 0.85; }
+.vw-close {
+  width: 28px; height: 28px; line-height: 1; font-size: 18px;
+  background: transparent; color: var(--text);
+  border: 1px solid var(--panel-border); border-radius: 8px; cursor: pointer;
+}
+.vw-close:hover { filter: brightness(1.1); }
+.vw-close:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent); }
+
+.vw-content {
+  padding: 10px 12px 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.vw-radar { display: block; }
+.vw-radar-svg { display: block; margin: 0 auto; }
+
+.vw-heat {
+  display: grid; place-items: center;
+  height: 72px;
+  color: var(--muted); font-size: .9rem;
+  border: 1px dashed rgba(255,255,255,0.18);
+  border-radius: 10px;
+}
+
+.vw-legend .vw-legend-row { display: flex; gap: 12px; align-items: center; font-size: .92rem; }
+.vw-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.vw-legend .dot.test { background: #e6cf9a; }
+.vw-legend .dot.odi { background: #2dd4bf; }
+.vw-legend .dot.t20i { background: #a78bfa; }
+
+.vw-info { display: grid; gap: 6px; font-size: .95rem; }
+.vw-info .row { display: flex; justify-content: space-between; gap: 12px; }
+.vw-info .k { color: var(--muted); }
 
 /* ==========================================================================
    Accessibility / Motion
@@ -319,7 +389,3 @@ svg { display: block; width: 100%; height: 100%; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
-
-/* Optional mini cosmetics for venue window */
-#venue-window .venue-title { letter-spacing: 0.2px; }
-#venue-window .venue-close:hover { filter: brightness(1.1); }

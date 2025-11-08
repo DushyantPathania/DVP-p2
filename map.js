@@ -156,7 +156,7 @@
       .attr("height", ICON_BASE)
       .attr("opacity", 0.95);
 
-    enter.append("title").text(d => d.venue);
+    enter.append("title").text(d => [d.venue, d.city, d.country].filter(Boolean).join(", "));
     sel.exit().remove();
 
     gVenues.selectAll("image.venue-icon")

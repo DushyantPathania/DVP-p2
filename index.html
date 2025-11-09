@@ -2,83 +2,57 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Cricket Globe/Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cricket Globe • D3</title>
   <link rel="stylesheet" href="styles.css" />
 
-  <!-- D3 + TopoJSON + sql.js -->
+  <!-- Libs -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://unpkg.com/topojson-client@3"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
-
-  <!-- App modules -->
-  <script src="db.js"></script>
-  <script src="venue.js"></script>
-  <script defer src="map.js"></script>
 </head>
 <body>
-  <!-- Map/Globe canvas -->
-  <div id="globe" aria-label="Interactive cricket globe and map"></div>
+  <!-- Globe / Map canvas -->
+  <div id="globe"></div>
 
-  <!-- Leaderboard trigger -->
+  <!-- Leaderboard toggle -->
   <button id="menuBtn" class="hamburger" aria-label="Open leaderboard" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
 
-  <!-- Leaderboard overlay + backdrop -->
+  <!-- Leaderboard overlay -->
   <div id="backdrop" class="backdrop" hidden></div>
-  <section id="leaderboardOverlay" class="overlay" aria-hidden="true" hidden>
-    <header class="overlay-header">
-      <h2 class="overlay-title">Leaderboard</h2>
-      <button id="closeOverlay" class="icon-btn" aria-label="Close">Close</button>
-    </header>
-
+  <div id="leaderboardOverlay" class="overlay" hidden aria-hidden="true" role="dialog" aria-modal="true">
+    <div class="overlay-header">
+      <h3 style="margin:0">Leaderboard</h3>
+      <button id="closeOverlay" class="icon-btn">Close</button>
+    </div>
     <div class="tabs" role="tablist" aria-label="Leaderboard tabs">
-      <button id="tab-batting" class="tab active" role="tab" aria-selected="true" data-kind="batting">Batting</button>
-      <button id="tab-bowling" class="tab" role="tab" aria-selected="false" data-kind="bowling">Bowling</button>
+      <button class="tab active" id="tab-batting" data-kind="batting" role="tab" aria-selected="true">Batting</button>
+      <button class="tab" id="tab-bowling" data-kind="bowling" role="tab" aria-selected="false">Bowling</button>
     </div>
+    <div id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0"></div>
+  </div>
 
-    <div id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0" aria-live="polite"></div>
-  </section>
-
-  <!-- Year range slider (custom dual handle) -->
-  <div id="yearSlider" class="year-slider" role="group" aria-label="Filter by year range">
-    <div class="year-labels">
-      <span id="yearMinLabel">2000</span>
-      <span id="yearMaxLabel">2025</span>
+  <!-- Year range box (bottom, centered) -->
+  <div id="yearBox" class="year-box" aria-label="Filter by year range">
+    <div class="yr-header">
+      <span id="yearBoxValue">Years 2000–2025</span>
     </div>
-
-    <div class="slider-wrap">
-      <!-- rail + selected range -->
-      <div class="track"></div>
-      <div class="range-highlight"></div>
-
-      <!-- thumbs (fully custom, draggable) -->
-      <div
-        class="thumb min"
-        tabindex="0"
-        role="slider"
-        aria-label="Start year"
-        aria-valuemin="2000"
-        aria-valuemax="2025"
-        aria-valuenow="2000"></div>
-
-      <div
-        class="thumb max"
-        tabindex="0"
-        role="slider"
-        aria-label="End year"
-        aria-valuemin="2000"
-        aria-valuemax="2025"
-        aria-valuenow="2025"></div>
-
-      <!-- live tooltips -->
-      <div class="thumb-tip min">2000</div>
-      <div class="thumb-tip max">2025</div>
-
-      <!-- ticks (JS fills every 5 yrs) -->
-      <div class="ticks"></div>
+    <div class="yr-slider">
+      <div class="yr-track"></div>
+      <div class="yr-fill"></div>
+      <div class="yr-thumb left"><div id="yrBubbleLeft" class="yr-bubble">2000</div></div>
+      <div class="yr-thumb right"><div id="yrBubbleRight" class="yr-bubble">2025</div></div>
     </div>
   </div>
+
+  <!-- Toast (loading hint) -->
+  <div id="loadingToast" class="toast"></div>
+
+  <!-- App scripts -->
+  <script src="db.js"></script>
+  <script src="venue.js"></script>
+  <script src="map.js"></script>
 </body>
 </html>

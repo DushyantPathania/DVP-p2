@@ -227,3 +227,136 @@ svg { width: 100%; height: 100%; display: block; }
   z-index: 9;
 }
 .toast.show { opacity: 1; }
+
+/* --- Tilt toggle styles (animation-rich, adapted from provided snippet) --- */
+.tilt-toggle {
+  --hue: 223;
+  --primary: hsl(var(--hue),90%,50%);
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 1201;
+  margin: 0;
+  perspective: 480px;
+  display: inline-block;
+  width: 3em;
+  height: 1.5em;
+  border-radius: 0.75em;
+  background-image:
+    linear-gradient(90deg,hsla(var(--hue),90%,40%,0) 20%,hsla(var(--hue),90%,40%,0.5) 30% 70%,hsl(var(--hue),90%,40%) 80%),
+    linear-gradient(hsl(var(--hue),90%,80%) 33%,hsl(var(--hue),90%,30%) 67%);
+  filter: grayscale(0.9);
+}
+
+/* input: keep full-size and interactive but visually transparent (we animate the label + ball) */
+.tilt-toggle__input{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* visual inner panel and shadow (on label pseudo elements) */
+.tilt-toggle::before,
+.tilt-toggle::after{
+  content: "";
+  position: absolute;
+  border-radius: 0.75em;
+}
+.tilt-toggle::before{
+  top: 0.125em;
+  left: 0.125em;
+  width: calc(100% - 0.25em);
+  height: calc(100% - 0.25em);
+  background-color: var(--primary);
+  box-shadow: 0 0 max(1px,0.05em) max(1px,0.05em) var(--primary);
+}
+.tilt-toggle::after{
+  top: 0.2em;
+  left: 0.2em;
+  width: 100%;
+  height: 100%;
+  background-color: hsla(var(--hue),90%,10%,0.7);
+  filter: blur(0.1em);
+  transform-origin: 0.75em 50%;
+  z-index: -1;
+}
+
+.tilt-toggle__input-ball{
+  position: absolute;
+  top: 0.25em;
+  left: calc(50% - 0.5em);
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  background-color: hsl(0,0%,100%);
+  box-shadow:
+    -0.05em -0.05em 0.1em hsl(var(--hue),10%,80%) inset,
+    -0.25em -0.25em 0.25em hsl(var(--hue),10%,60%) inset,
+    0.15em 0.15em 0.0625em hsla(var(--hue),10%,10%,0.7);
+  transform: translate3d(-0.75em,0,0.3em);
+}
+.tilt-toggle__sr{position:absolute;width:1px;height:1px;overflow:hidden}
+
+.tilt-toggle,
+.tilt-toggle::before,
+.tilt-toggle::after,
+.tilt-toggle__input-ball{
+  animation: tiltOffA 0.6s ease-in-out forwards;
+}
+.tilt-toggle::before{ animation-name: tiltOffB; }
+.tilt-toggle::after{ animation-name: shadowOff; }
+.tilt-toggle__input-ball{ animation-name: rollOff; }
+
+/* :checked state (uses :has to update label pseudo-elements when input is checked) */
+.tilt-toggle:has(.tilt-toggle__input:checked){
+  animation-name: tiltOnA;
+  filter: grayscale(0);
+}
+.tilt-toggle:has(.tilt-toggle__input:checked)::before{ animation-name: tiltOnB; }
+.tilt-toggle:has(.tilt-toggle__input:checked)::after{
+  animation-name: shadowOn;
+  transform-origin: calc(100% - 0.75em) 50%;
+}
+.tilt-toggle__input:checked + .tilt-toggle__input-ball{
+  animation-name: rollOn;
+  transform: translate3d(0.75em,0,0.3em);
+}
+.tilt-toggle:has(.tilt-toggle__input:checked), .tilt-toggle.is-checked{
+  animation-name: tiltOnA;
+  filter: grayscale(0);
+}
+.tilt-toggle:has(.tilt-toggle__input:checked)::before, .tilt-toggle.is-checked::before{ animation-name: tiltOnB; }
+.tilt-toggle:has(.tilt-toggle__input:checked)::after, .tilt-toggle.is-checked::after{
+  animation-name: shadowOn;
+  transform-origin: calc(100% - 0.75em) 50%;
+}
+
+/* pristine: disable animations until user interacts */
+.tilt-toggle--pristine,
+.tilt-toggle--pristine::before,
+.tilt-toggle--pristine::after,
+.tilt-toggle--pristine .tilt-toggle__input-ball{
+  animation: none !important;
+}
+
+/* Animations (copied/adapted from provided snippet) */
+@keyframes shadowOn { from { transform: skewY(0); } 50% { transform: skewY(-10deg); } to { transform: skewY(0); } }
+@keyframes shadowOff { from { transform: skewY(0); } 50% { transform: skewY(10deg); } to { transform: skewY(0); } }
+@keyframes rollOn { from { transform: rotateY(0) translate3d(-0.75em,0,0.3em) rotateY(0); } 50% { transform: rotateY(20deg) translate3d(0.75em,0,0.3em) rotateY(-20deg); } to { transform: rotateY(0) translate3d(0.75em,0,0.3em) rotateY(0); } }
+@keyframes rollOff { from { transform: rotateY(0) translate3d(0.75em,0,0.3em) rotateY(0); } 50% { transform: rotateY(-20deg) translate3d(-0.75em,0,0.3em) rotateY(20deg); } to { transform: rotateY(0) translate3d(-0.75em,0,0.3em) rotateY(0); } }
+@keyframes tiltOnA { from { filter: grayscale(0.9); transform: rotateY(0); } 50% { filter: grayscale(0); transform: rotateY(20deg); } to { filter: grayscale(0); transform: rotateY(0); } }
+@keyframes tiltOffA { from { filter: grayscale(0); transform: rotateY(0); } 50% { filter: grayscale(0.9); transform: rotateY(-20deg); } to { filter: grayscale(0.9); transform: rotateY(0); } }
+@keyframes tiltOnB { from { transform: translate3d(0,0,0); } 50% { transform: translate3d(0.0625em,0,0); } to { transform: translate3d(0,0,0); } }
+@keyframes tiltOffB { from { transform: translate3d(0,0,0); } 50% { transform: translate3d(-0.0625em,0,0); } to { transform: translate3d(0,0,0); } }
+
+/* small accessibility helper */
+.tilt-toggle__sr { overflow: hidden; position: absolute; width: 1px; height: 1px; }
+
+/* end tilt toggle */

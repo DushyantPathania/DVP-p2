@@ -19,6 +19,13 @@
   <button id="menuBtn" class="hamburger" aria-label="Open leaderboard" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
+  <!-- 3D/2D tilt toggle (replaces SVG toggle in map.js) -->
+  <label class="tilt-toggle" aria-label="Toggle 3D/2D view">
+    <input class="tilt-toggle__input" type="checkbox" aria-checked="false" aria-label="Toggle 3D/2D">
+    <span class="tilt-toggle__input-ball">
+      <span class="tilt-toggle__sr">Toggle 3D/2D</span>
+    </span>
+  </label>
 
   <!-- Leaderboard overlay -->
   <div id="backdrop" class="backdrop" hidden></div>
@@ -53,6 +60,7 @@
   <!-- App scripts -->
   <script src="db.js"></script>
   <script src="venue.js"></script>
+  <script src="tilt-toggle.js"></script>
   <script src="map.js"></script>
 </body>
 </html>

@@ -281,28 +281,30 @@
     .scaleExtent([1, 12])
     .on("zoom", (event) => { mapZoomK = event.transform.k; gRoot.attr("transform", event.transform); });
 
-  /* ----------------------------- Mode Toggle -------------------------------- */
-  const TOGGLE = { w: 120, h: 36, r: 18, m: 16 };
-  const ui = gUI.append("g").attr("class", "mode-toggle").attr("role", "switch").attr("tabindex", 0)
-    .attr("aria-checked","false").style("cursor","pointer");
-  ui.append("rect").attr("rx", TOGGLE.r).attr("ry", TOGGLE.r).attr("width", TOGGLE.w).attr("height", TOGGLE.h)
-    .style("fill","#134e4a").style("stroke","rgba(255,255,255,0.2)").style("stroke-width",1.2);
-  const label3d = ui.append("text").attr("x",22).attr("y", TOGGLE.h/2 + 4).attr("text-anchor","start")
-    .style("font","600 12px system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif").style("fill","var(--text)").text("3D");
-  const label2d = ui.append("text").attr("x", TOGGLE.w-22).attr("y", TOGGLE.h/2 + 4).attr("text-anchor","end")
-    .style("font","600 12px system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif").style("fill","var(--muted)").text("2D");
-  const knob = ui.append("circle").attr("cy", TOGGLE.h/2).attr("r", TOGGLE.h/2 - 4).style("fill","var(--text)");
-  function knobX(){ return mode === "globe" ? TOGGLE.h/2 : TOGGLE.w - TOGGLE.h/2; }
-  function positionToggle(){ ui.attr("transform", `translate(${TOGGLE.m}, ${TOGGLE.m})`); }
+  /* ----------------------------- Mode Toggle (HTML checkbox) ------------------------- */
+  // Replace the previous SVG toggle with a small HTML checkbox toggle. The checkbox
+  // lives in the page (`index.html`) as `.tilt-toggle__input`. Checked => map (2D), unchecked => globe (3D).
+  const tiltInputEl = document.querySelector('.tilt-toggle__input');
+
   function updateToggleUI(animate=true){
-    ui.attr("aria-checked", mode === "map" ? "true" : "false");
-    label3d.style("fill", mode === "globe" ? "var(--text)" : "var(--muted)");
-    label2d.style("fill", mode === "map"   ? "var(--text)" : "var(--muted)");
-    (animate ? knob.transition().duration(160) : knob).attr("cx", knobX());
+    if (!tiltInputEl) return;
+    const shouldBeChecked = (mode === "map");
+    // avoid unnecessary DOM writes
+    if (tiltInputEl.checked !== shouldBeChecked) tiltInputEl.checked = shouldBeChecked;
+    tiltInputEl.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
   }
-  ["mousedown","touchstart","wheel"].forEach(ev => ui.on(ev, (event) => event.stopPropagation(), true));
-  ui.on("click", () => setMode(mode === "globe" ? "map" : "globe"));
-  ui.on("keydown", (event) => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); setMode(mode === "globe" ? "map" : "globe"); } });
+
+  // connect input to setMode: checked -> map, unchecked -> globe
+  if (tiltInputEl) {
+    tiltInputEl.addEventListener('change', (e) => {
+      const nm = e.target.checked ? 'map' : 'globe';
+      setMode(nm);
+    });
+    // ensure UI interaction doesn't bubble to svg zoom/drag
+    ["pointerdown","mousedown","touchstart","wheel"].forEach(ev =>
+      tiltInputEl.addEventListener(ev, e => e.stopPropagation(), { passive: true })
+    );
+  }
 
   function setMode(newMode){
     if (newMode === mode) return;
@@ -334,7 +336,7 @@
       const margin = 20;
       projection.fitExtent([[margin, margin], [width - margin, height - margin]], { type: "Sphere" });
     }
-    positionToggle(); redrawAll();
+  redrawAll();
     initYearBox(true);  // recompute slider geometry on resize
   }
   window.addEventListener("resize", resize);
@@ -498,7 +500,7 @@
   svg.call(zoomGlobe).call(zoomGlobe.transform, d3.zoomIdentity);
 
   // UI toggle + spin
-  positionToggle(); updateToggleUI(false); startSpin();
+  updateToggleUI(false); startSpin();
 
   // pause/resume spin on popup
   window.addEventListener("venuewindow:open",  () => stopSpin());

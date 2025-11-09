@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cricket Globe • D3</title>
   <link rel="stylesheet" href="styles.css" />
+  <!-- Fancy readable font for UI -->
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 
   <!-- Libs -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -20,12 +23,19 @@
     <span></span><span></span><span></span>
   </button>
   <!-- 3D/2D tilt toggle (replaces SVG toggle in map.js) -->
-  <label class="tilt-toggle" aria-label="Toggle 3D/2D view">
-    <input class="tilt-toggle__input" type="checkbox" aria-checked="false" aria-label="Toggle 3D/2D">
-    <span class="tilt-toggle__input-ball">
-      <span class="tilt-toggle__sr">Toggle 3D/2D</span>
-    </span>
-  </label>
+  <div class="tilt-toggle" aria-label="Toggle 3D/2D view" data-name-globe="3D" data-name-map="2D" data-verbose-globe="Click to view 3D — interactive globe (tilt & rotate)." data-verbose-map="Click to view 2D — flat map (pan & zoom).">
+    <!-- Toggle markup adapted from: https://codepen.io/josetxu/pen/mdQePNo (author: josetxu) -->
+    <div class="toggle">
+      <input type="checkbox" id="btn" class="tilt-toggle__input" aria-checked="false" aria-label="Toggle 3D/2D">
+      <label for="btn">
+        <span class="thumb" aria-hidden="true"></span>
+      </label>
+      <div class="lights">
+        <span class="light-off" aria-hidden="true"></span>
+        <span class="light-on" aria-hidden="true"></span>
+      </div>
+    </div>
+  </div>
 
   <!-- Leaderboard overlay -->
   <div id="backdrop" class="backdrop" hidden></div>

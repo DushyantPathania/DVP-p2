@@ -292,6 +292,17 @@
     // avoid unnecessary DOM writes
     if (tiltInputEl.checked !== shouldBeChecked) tiltInputEl.checked = shouldBeChecked;
     tiltInputEl.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
+    // ensure parent label reflects checked state (keeps visuals in sync when changed programmatically)
+    const lbl = tiltInputEl.closest && tiltInputEl.closest('.tilt-toggle');
+    if (lbl) {
+      // if caller wants animation, remove pristine state so animations can run
+      if (animate) lbl.classList.remove('tilt-toggle--pristine');
+      lbl.classList.toggle('is-checked', shouldBeChecked);
+      // set accessible title / tooltip with short names
+      const nameGlobe = lbl.dataset.nameGlobe || 'Globe';
+      const nameMap = lbl.dataset.nameMap || 'Map';
+      lbl.setAttribute('title', shouldBeChecked ? nameMap : nameGlobe);
+    }
   }
 
   // connect input to setMode: checked -> map, unchecked -> globe

@@ -25,7 +25,7 @@
   const btnClose    = document.getElementById("closeOverlay");
   const tabPanel    = document.getElementById("tabpanel");
   const tabBtns     = [document.getElementById("tab-batting"), document.getElementById("tab-bowling")];
-  const spikeLegend = document.getElementById("spikeLegend");
+  let spikeLegend = null; // created dynamically by createLegendUI()
   const enterBtn    = document.getElementById("enterBtn");
 
   // Year slider elements
@@ -86,7 +86,6 @@
   let choroActive     = false;
   let choroByCountry  = new Map(); // key -> {matches, homeWins, winPct}
   let spikeScale      = d3.scaleSqrt().domain([0,1]).range([0, 30]);
-  const colorScale    = d3.scaleLinear().domain([0, 0.5, 1]).range(["#e64a19", "#f7e082", "#2e7d32"]);
 
   /* ----------------------------- Demo leaderboard -------------------------- */
   const battingData = [
@@ -148,6 +147,22 @@
   const HOST_SYNS   = ["venue_country","host_country","host","country","home_country","venuecountry"];
   const NEUTRAL_SYNS= ["neutral_venue","neutral","neutralground"];
   const RESULT_SYNS = ["result_type","result","outcome_type"];
+  const FORMAT_SYNS = ["format","match_type","type","game_type","format_type"];
+
+  // color palettes per format (low -> mid -> high)
+  const PALETTES = {
+    all: ["#e64a19", "#f7e082", "#2e7d32"],   // red -> yellow -> green
+    odi: ["#e6f2ff", "#66b3ff", "#005b96"],   // light blue -> bright -> deep blue
+    t20: ["#fff0f7", "#f07fbf", "#7a0177"],  // pink -> magenta -> purple
+    test:["#fff7e6", "#f4b942", "#8b4513"]   // pale -> ochre -> brown
+  };
+  let selectedFormat = 'all';
+  const colorScales = {
+    all: d3.scaleLinear().domain([0,0.5,1]).range(PALETTES.all),
+    odi: d3.scaleLinear().domain([0,0.5,1]).range(PALETTES.odi),
+    t20: d3.scaleLinear().domain([0,0.5,1]).range(PALETTES.t20),
+    test: d3.scaleLinear().domain([0,0.5,1]).range(PALETTES.test)
+  };
 
   /* ---------------------------- Geography ---------------------------------- */
   function drawStaticLayers() {
@@ -279,7 +294,8 @@
       if (winnerCol && dateCol && hostCol) {
         const neutralCol = NEUTRAL_SYNS.find(c => cols.includes(c));
         const resultCol  = RESULT_SYNS.find(c => cols.includes(c));
-        out.push({ name: n, cols, map: { winnerCol, dateCol, hostCol, neutralCol, resultCol } });
+        const formatCol  = FORMAT_SYNS.find(c => cols.includes(c));
+        out.push({ name: n, cols, map: { winnerCol, dateCol, hostCol, neutralCol, resultCol, formatCol } });
       }
     }
 
@@ -299,13 +315,15 @@
           const m = t.map;
           const neutralExpr = m.neutralCol ? `COALESCE(${m.neutralCol},0)` : "0";
           const resultExpr  = m.resultCol  ? `COALESCE(${m.resultCol},'')`  : "''";
+          const formatExpr  = m.formatCol ? `COALESCE(${m.formatCol},'')` : "''";
           return `
             SELECT
               ${m.winnerCol} AS winner,
               ${m.hostCol}   AS venue_country,
               ${m.dateCol}   AS date,
               ${neutralExpr} AS neutral_venue,
-              ${resultExpr}  AS result_type
+              ${resultExpr}  AS result_type,
+              ${formatExpr}  AS format
             FROM ${t.name}
           `;
         });
@@ -322,7 +340,15 @@
       }
     }
 
+    // Aggregate totals overall and per-format
     const agg = new Map();
+    function ensureRec(key){
+      if (!agg.has(key)) {
+        agg.set(key, { matches:0, homeWins:0, formats: { all:{matches:0,homeWins:0}, odi:{matches:0,homeWins:0}, t20:{matches:0,homeWins:0}, test:{matches:0,homeWins:0} } });
+      }
+      return agg.get(key);
+    }
+
     for (const r of rows) {
       const y = +(String(r.date).slice(0,4));
       if (!y || y < yearMin || y > yearMax) continue;
@@ -338,16 +364,34 @@
       const homeTeam = canonicalTeamName(hostToHomeTeamCountry(hostKey));
       const win      = canonicalTeamName(r.winner || "") === homeTeam;
 
-      const b = agg.get(hostKey) || { matches:0, homeWins:0 };
-      b.matches += 1; if (win) b.homeWins += 1;
-      agg.set(hostKey, b);
+      const rec = ensureRec(hostKey);
+      // overall
+      rec.matches += 1; if (win) rec.homeWins += 1;
+
+      // format-specific increment
+      const fmtRaw = String(r.format || "").toLowerCase().trim();
+      const fmt = (fmtRaw.includes('odi')) ? 'odi' : (fmtRaw.includes('t20') || fmtRaw.includes('twenty')) ? 't20' : (fmtRaw.includes('test') ? 'test' : null);
+      if (fmt && rec.formats[fmt]){
+        rec.formats[fmt].matches += 1;
+        if (win) rec.formats[fmt].homeWins += 1;
+      }
     }
-    agg.forEach(v => v.winPct = v.matches ? v.homeWins / v.matches : 0);
+    // compute per-format winPct and overall
+    agg.forEach(v => {
+      v.winPct = v.matches ? v.homeWins / v.matches : 0;
+      for (const k of Object.keys(v.formats)){
+        const f = v.formats[k]; f.winPct = f.matches ? f.homeWins / f.matches : 0;
+      }
+    });
 
     choroByCountry = agg;
     choroActive = agg.size > 0;
 
-    const maxMatches = d3.max(Array.from(agg.values()), d => d.matches) || 1;
+    // compute max matches for selected format
+    const maxMatches = d3.max(Array.from(agg.values()), d => {
+      if (selectedFormat === 'all') return d.matches;
+      return d.formats[selectedFormat] ? d.formats[selectedFormat].matches : 0;
+    }) || 1;
     spikeScale.domain([0, maxMatches]).range([0, mode==="globe" ? 32 : 40]);
 
     document.body.classList.toggle("choro-on", choroActive);
@@ -361,19 +405,26 @@
     if (!choroActive) return;
     gCountries.selectAll("path.country")
       .style("fill", d => {
-        const key = canonicalMapName(d.properties?.name || "");
-        const rec = choroByCountry.get(key);
-        return rec ? colorScale(rec.winPct) : null;
-      })
+          const key = canonicalMapName(d.properties?.name || "");
+          const rec = choroByCountry.get(key);
+          if (!rec) return null;
+          const fmtRec = (selectedFormat === 'all') ? rec : (rec.formats[selectedFormat] && rec.formats[selectedFormat].matches ? rec.formats[selectedFormat] : null);
+          const pct = fmtRec ? (fmtRec.winPct ?? 0) : rec.winPct;
+          const scale = colorScales[selectedFormat] || colorScales.all;
+          return scale(pct);
+        })
       .selectAll("title").remove();
 
     gCountries.selectAll("path.country").append("title")
       .text(d => {
         const key = canonicalMapName(d.properties?.name || "");
-        const rec = choroByCountry.get(key);
-        if (!rec) return d.properties?.name || "";
-        const pct = Math.round(rec.winPct*100);
-        return `${d.properties?.name}: Home wins ${pct}% (${rec.homeWins}/${rec.matches})`;
+          const rec = choroByCountry.get(key);
+          if (!rec) return d.properties?.name || "";
+          const fmtRec = (selectedFormat === 'all') ? rec : (rec.formats[selectedFormat] && rec.formats[selectedFormat].matches ? rec.formats[selectedFormat] : null);
+          const pct = Math.round(((fmtRec ? (fmtRec.winPct ?? 0) : rec.winPct) * 100));
+          const m = fmtRec ? fmtRec.matches : rec.matches;
+          const w = fmtRec ? fmtRec.homeWins : rec.homeWins;
+          return `${d.properties?.name}: Home wins ${pct}% (${w}/${m})`;
       });
   }
 
@@ -381,19 +432,23 @@
     const data = [];
     countries.forEach(f => {
       const key = canonicalMapName(f.properties?.name || "");
-      const rec = choroByCountry.get(key);
-      if (!rec || !rec.matches) return;
+  const rec = choroByCountry.get(key);
+  if (!rec) return;
+  const fmtRec = (selectedFormat === 'all') ? rec : (rec.formats[selectedFormat] && rec.formats[selectedFormat].matches ? rec.formats[selectedFormat] : null);
+  const matches = fmtRec ? fmtRec.matches : rec.matches;
+  const winPct  = fmtRec ? (fmtRec.winPct ?? 0) : rec.winPct;
+  if (!matches) return;
       const c = d3.geoCentroid(f);
       if (!c || !isFinite(c[0]) || !isFinite(c[1])) return;
-      data.push({ key, lon:c[0], lat:c[1], matches:rec.matches, winPct:rec.winPct });
+      data.push({ key, lon:c[0], lat:c[1], matches, winPct });
     });
 
     const sel = gSpikes.selectAll("line.spike").data(data, d => d.key);
     sel.exit().remove();
     sel.enter().append("line").attr("class","spike")
-      .merge(sel)
-      .attr("stroke", d => colorScale(d.winPct))
-      .attr("opacity", 0.95);
+  .merge(sel)
+  .attr("stroke", d => (colorScales[selectedFormat] || colorScales.all)(d.winPct))
+  .attr("opacity", 0.95);
 
     updateSpikesPosition();
   }
@@ -428,6 +483,61 @@
       svgL.append("line").attr("x1", cx-6).attr("y1", y).attr("x2", cx+6).attr("y2", y).attr("stroke", "#fff").attr("opacity",0.6);
       svgL.append("text").attr("x", cx+12).attr("y", y+3).attr("fill","#fff").attr("font-size", 11).text(t);
     });
+  }
+
+  // Create legend UI using D3 and place it to the right, below the toggle
+  function createLegendUI(){
+    // Remove any existing legend created earlier
+    d3.selectAll('.legend').remove();
+
+    const legend = d3.select('body').append('div').attr('class','legend').attr('aria-live','polite');
+
+    // Section: choropleth + format buttons
+    const sec1 = legend.append('div').attr('class','legend-section');
+    const header = sec1.append('div').style('display','flex').style('align-items','center').style('gap','12px').style('justify-content','space-between');
+    header.append('div').attr('class','legend-title').text('Home win % (by host country)');
+    const fmtWrap = header.append('div').attr('class','format-toggle').attr('role','tablist').attr('aria-label','Format filter');
+    fmtWrap.append('button').attr('class','fmt-btn').attr('data-format','all').attr('role','tab').attr('aria-selected','true').text('All');
+    fmtWrap.append('button').attr('class','fmt-btn').attr('data-format','odi').attr('role','tab').attr('aria-selected','false').text('ODI');
+    fmtWrap.append('button').attr('class','fmt-btn').attr('data-format','t20').attr('role','tab').attr('aria-selected','false').text('T20');
+    fmtWrap.append('button').attr('class','fmt-btn').attr('data-format','test').attr('role','tab').attr('aria-selected','false').text('Test');
+
+    const grad = sec1.append('div').attr('class','legend-gradient');
+    grad.append('div').attr('class','legend-gradbar');
+    grad.append('div').attr('class','legend-scale').html('<span>0%</span><span>50%</span><span>100%</span>');
+
+    // Section: spike legend (svg)
+    const sec2 = legend.append('div').attr('class','legend-section');
+    sec2.append('div').attr('class','legend-title').text('Win spikes = matches hosted');
+    // attach an svg for spike legend
+    const svgEl = sec2.append('svg').attr('width', 160).attr('height', 72);
+    spikeLegend = svgEl.node();
+
+    // Position the legend: top-right, below toggle
+    // CSS `.legend` rules provide baseline styling; adjust position relative to toggle
+    // ensure the element exists for setupFormatUI to wire
+    return legend.node();
+  }
+
+  // Format selector UI wiring
+  function setupFormatUI(){
+    const btns = document.querySelectorAll('.fmt-btn');
+    if (!btns || !btns.length) return;
+    btns.forEach(b => b.addEventListener('click', () => {
+      const fmt = b.dataset.format || 'all';
+      selectedFormat = fmt;
+      btns.forEach(x => x.setAttribute('aria-selected', x === b ? 'true' : 'false'));
+      // update legend gradient
+      const grad = document.querySelector('.legend-gradbar');
+      if (grad) grad.style.background = `linear-gradient(90deg, ${PALETTES[fmt][0]}, ${PALETTES[fmt][1]}, ${PALETTES[fmt][2]})`;
+      // recompute spike domain based on available aggregated data
+      const maxMatches = d3.max(Array.from(choroByCountry.values()||[]), d => (selectedFormat==='all' ? d.matches : (d.formats[selectedFormat] ? d.formats[selectedFormat].matches : 0))) || 1;
+      spikeScale.domain([0, maxMatches]);
+      applyChoropleth(); drawSpikes(); renderSpikeLegend(maxMatches);
+    }));
+    // initialize gradient
+    const initGrad = document.querySelector('.legend-gradbar');
+    if (initGrad) initGrad.style.background = `linear-gradient(90deg, ${PALETTES.all[0]}, ${PALETTES.all[1]}, ${PALETTES.all[2]})`;
   }
 
   /* ---------------------------- Redraw Cycle -------------------------------- */
@@ -528,6 +638,8 @@
       resize(); redrawAll(); startSpin();
     }
     updateToggleUI(true);
+    // reflect map vs globe in body class so UI (legend) can adapt
+    document.body.classList.toggle('map-mode', mode === 'map');
     const maxMatches = d3.max(Array.from(choroByCountry.values()||[]), d => d.matches) || 1;
     spikeScale.range([0, mode==="globe" ? 32 : 40]);
     updateSpikesPosition();
@@ -703,6 +815,9 @@
   svg.call(zoomGlobe).call(zoomGlobe.transform, d3.zoomIdentity);
   updateToggleUI(false); startSpin();
 
+  // build legend UI (D3) and wire format buttons
+  createLegendUI();
+
   // pause/resume spin on popup
   window.addEventListener("venuewindow:open",  () => stopSpin());
   window.addEventListener("venuewindow:close", () => { if (mode==="globe" && !countryFocused) startSpin(); });
@@ -732,6 +847,8 @@
 
   // initial choropleth + spikes
   await computeChoropleth(yearRange.min, yearRange.max);
+  // wire up the format selector once initial data is available
+  setupFormatUI();
 
   /* ------------------------- Utilities: slider ------------------------------ */
   function clamp(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }

@@ -150,17 +150,46 @@ body.choro-on .country.has-venues { fill: inherit; }
 .hamburger.open span:nth-child(2) { opacity: 0; }
 .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
 
-/* ===== Legend ============================================================ */
+/* ===== Legend (compact by default) ====================================== */
 .legend{
-  position: fixed; left: 16px; bottom: 18px; z-index: 8;
-  width: min(360px, calc(100vw - 32px));
+  position: fixed;
+  right: 12px;
+  top: 52px; /* placed below the toggle (toggle sits ~12px from top) */
+  z-index: 1202;
+  width: 220px;
+  max-width: 220px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: 10px;
   color: var(--text);
-  padding: 10px 12px;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+  padding: 8px 10px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
 }
+
+/* Compact legend for 2D map mode: smaller width, padding and typography */
+/* Typography & small adjustments for compact legend */
+.legend .legend-title{ font-size: 0.86rem; }
+.legend .legend-gradbar{ height: 10px; }
+.legend .legend-scale{ font-size: 10px; }
+.legend svg{ width: 120px; height: 56px; }
+
+/* Make legend slightly larger on very small screens to improve readability */
+@media (max-width: 520px){
+  .legend{ right: 8px; top: 64px; width: 200px; max-width: 200px; padding: 8px; }
+}
+/* Format toggle buttons (legend) */
+.format-toggle { display: inline-flex; gap: 6px; }
+.fmt-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fmt-btn[aria-selected="true"]{ background: linear-gradient(90deg, rgba(255,138,0,0.12), rgba(45,212,191,0.06)); color: var(--text); border-color: rgba(255,138,0,0.22); }
+.fmt-btn:focus{ outline: none; box-shadow: 0 0 0 3px rgba(255,138,0,0.12); }
 .legend-section + .legend-section{ margin-top: 10px; }
 .legend-title{ font-size: 0.92rem; color: var(--muted); margin-bottom: 6px; }
 .legend-gradient{ display: grid; gap: 6px; }
@@ -428,7 +457,6 @@ body.landing #globe{
     linear-gradient(180deg, rgba(4,24,36,0.55) 0%, rgba(7,18,26,0.55) 60%, rgba(2,16,23,0.55) 100%);
 }
 #globe,
-.legend,
 .year-box,
 .hamburger,
 #leaderboardOverlay,

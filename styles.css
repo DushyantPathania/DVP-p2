@@ -3,18 +3,10 @@ html, body { height: 100%; margin: 0; overflow: hidden; }
 body {
   overscroll-behavior: none;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif;
-  /* Toned-down cricket-themed background:
-     - base: deep, slightly blue-green gradient for depth
-     - stripes: subtle repeating pitch/field stripes
-     - stadium lights: soft radial glow
-  */
-  /* Use a custom background image if present, then subtle overlays for texture */
   background:
-    /* softened overlays whose alpha is multiplied by --bg-dim (derived from --bg-brightness) */
     linear-gradient(180deg, rgba(0,0,0, calc(var(--bg-dim) * 0.28)), rgba(0,0,0, calc(var(--bg-dim) * 0.42))),
     radial-gradient(900px 600px at 12% 10%, rgba(255,255,255, calc(var(--bg-dim) * 0.025)), transparent 50%),
     repeating-linear-gradient(90deg, rgba(255,255,255, calc(var(--bg-dim) * 0.006)) 0px, rgba(255,255,255, calc(var(--bg-dim) * 0.006)) 1px, transparent 1px, transparent 60px),
-    /* reduced wash opacity so the image shows through more; scale with --bg-dim */
     linear-gradient(180deg, rgba(4,24,36, calc(var(--bg-dim) * 0.55)) 0%, rgba(7,18,26, calc(var(--bg-dim) * 0.55)) 60%, rgba(2,16,23, calc(var(--bg-dim) * 0.55)) 100%),
     url("data/icon/bg.jpg");
   background-repeat: no-repeat;
@@ -22,7 +14,7 @@ body {
   background-size: cover;
 }
 
-/* subtle cricket silhouette (wickets) and overlay for character — very low-contrast */
+/* subtle cricket silhouette */
 body::before{
   content: "";
   position: fixed;
@@ -40,33 +32,29 @@ body::before{
 
 /* ===== Theme vars (cricket-ish) ========================================= */
 :root{
-  /* Background brightness control:
-     --bg-brightness: 1 = full bright (no dim), 0 = fully dimmed (dark).
-     Adjust this to control how bright/dim the background image appears.
-     --bg-dim is derived as (1 - --bg-brightness) and is multiplied into overlay alphas.
-  */
   --bg-brightness: 0.69;
   --bg-dim: calc(1 - var(--bg-brightness));
-  /* Sunrise ODI palette (energetic daytime broadcast)
-    - Mood: warm sunrise accents, teal seas, sunlit beige land, vivid field green
-    - Use for lively, colorful dashboards and broadcast-style visuals
-  */
-  --ocean: #0b6b8f;           /* teal-blue sea */
-  --ocean-stroke: #064a61;    /* darker teal edge */
-  --land: #f5e6c8;            /* sunlit beige */
-  --land-stroke: #b07a2e;     /* pitch outline (warm brown) */
-  --graticule: #66b2a8;       /* soft teal/graticule */
+  --ocean: #0b6b8f;
+  --ocean-stroke: #064a61;
+  --land: #f5e6c8;
+  --land-stroke: #b07a2e;
+  --graticule: #66b2a8;
   --boundary-stroke: rgba(160,120,60,0.6);
 
-  --hover-fill: #fff6e8;      /* warm light on hover */
-  --hover-stroke: #ff8a00;    /* sunrise orange accent */
+  --hover-fill: #fff6e8;
+  --hover-stroke: #ff8a00;
   --hover-shadow: rgba(255,138,0,0.18);
 
-  --panel-bg: rgba(3, 12, 15, 0.92); /* deep panel for contrast */
+  --panel-bg: rgba(3, 12, 15, 0.92);
   --panel-border: rgba(255,200,140,0.08);
-  --text: #fffdf5;            /* warm off-white text */
-  --muted: #b9dace;           /* muted teal */
-  --accent: #ff8a00;          /* sunrise orange/gold accent */
+  --text: #fffdf5;
+  --muted: #b9dace;
+  --accent: #ff8a00;
+
+  /* choropleth palette stops (0 -> 0.5 -> 1) */
+  --choro-low: #e64a19;     /* low home win% (reddish) */
+  --choro-mid: #f7e082;     /* mid */
+  --choro-high:#2e7d32;     /* high (green) */
 }
 
 /* ===== Canvas ============================================================ */
@@ -89,9 +77,20 @@ svg { width: 100%; height: 100%; display: block; }
   fill: var(--hover-fill); stroke: var(--hover-stroke); stroke-width: 1.1px;
   filter: drop-shadow(0 0 6px var(--hover-shadow));
 }
+/* When choropleth is active, keep the venue glow but don't override fill */
 .country.has-venues {
   fill: #fff3d6;
   filter: drop-shadow(0 0 6px rgba(255, 235, 150, 0.35));
+}
+body.choro-on .country.has-venues { fill: inherit; }
+
+/* Spikes */
+.spike {
+  stroke: rgba(255,255,255,0.9);
+  stroke-width: 2px;
+  stroke-linecap: round;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
 }
 
 /* Venue markers (SVG <image>) */
@@ -105,7 +104,7 @@ svg { width: 100%; height: 100%; display: block; }
 }
 .venue-icon:hover { transform: scale(1.12); }
 
-/* ===== Hamburger (top-right) ============================================ */
+/* ===== Hamburger (top-left) ============================================= */
 .hamburger {
   position: fixed; left: 16px; top: 16px; width: 44px; height: 44px; border-radius: 10px;
   display: grid; place-items: center; background: #134e4a; border: 1px solid rgba(255,255,255,0.2);
@@ -119,6 +118,28 @@ svg { width: 100%; height: 100%; display: block; }
 .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
 .hamburger.open span:nth-child(2) { opacity: 0; }
 .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ===== Legend ============================================================ */
+.legend{
+  position: fixed; left: 16px; bottom: 18px; z-index: 8;
+  width: min(320px, calc(100vw - 32px));
+  background: rgba(6, 29, 22, 0.92);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  color: var(--text);
+  padding: 10px 12px;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+}
+.legend-section + .legend-section{ margin-top: 10px; }
+.legend-title{ font-size: 0.92rem; color: var(--muted); margin-bottom: 6px; }
+.legend-gradient{ display: grid; gap: 6px; }
+.legend-gradbar{
+  width: 100%; height: 12px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: linear-gradient(90deg, var(--choro-low), var(--choro-mid), var(--choro-high));
+  box-shadow: inset 0 2px 10px rgba(0,0,0,0.35);
+}
+.legend-scale{ display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 
 /* ===== Backdrop & Overlay =============================================== */
 .backdrop {
@@ -270,24 +291,16 @@ svg { width: 100%; height: 100%; display: block; }
 
 /* --- Toggle styled after CodePen example: https://codepen.io/josetxu/pen/mdQePNo (author: josetxu) --- */
 .tilt-toggle{
-  /* visually nudge to the right using translateX so "right" semantics stay stable */
   position: fixed; top: 16px; right: 64px; z-index: 1201;
-  transform: translateX(12px); /* move 12px further to the right */
+  transform: translateX(12px);
   will-change: transform;
-  /* decreased size by 30% then further reduced to 56% of original (3.2vmin * 0.56) */
   --sz: calc(3.2vmin * 0.56);
-  --on: #99dc39; /* on color */
-  --of: #F44336; /* off color */
-  --lg: var(--of);
-  --sp: 300ms; /* speed: reduced from 1s to avoid jitter */
+  --on: #99dc39; --of: #F44336; --lg: var(--of); --sp: 300ms;
 }
-
 .tilt-toggle * { box-sizing: border-box; }
-
 .tilt-toggle { display: flex; align-items: center; gap: 10px; flex-direction: row-reverse; }
 .tilt-toggle .toggle { position: relative; width: calc(var(--sz) * 5.2); height: calc(var(--sz) * 2); display: flex; align-items: center; justify-content: center; }
 .tilt-toggle input { display: none; }
-
 .tilt-toggle label[for=btn] {
   position: absolute; width: calc(var(--sz) * 5.2); height: calc(var(--sz) * 2);
   background: linear-gradient(0deg, #12172080, #0d121780);
@@ -295,13 +308,11 @@ svg { width: 100%; height: 100%; display: block; }
   display: flex; align-items: center; justify-content: center;
   padding: calc(var(--sz) / 8);
 }
-
 .tilt-toggle label[for=btn]:before {
   content: ""; position: absolute; width: 100%; height: 100%; border-radius: var(--sz);
   background: radial-gradient(circle at 50% calc(var(--sz) / 0.0845), #fff0 calc(var(--sz) / 0.1), #121212 calc(calc(var(--sz) / 0.1) + 1px) calc(var(--sz) / 0.0875), #fff0 calc(calc(var(--sz) / 0.0875) + 1px) 100%), radial-gradient(circle at 50% calc(var(--sz) / -0.1015), #fff0 calc(var(--sz) / 0.1), #121212 calc(calc(var(--sz) / 0.1) + 1px) calc(var(--sz) / 0.0875), #fff0 calc(calc(var(--sz) / 0.0875) + 1px) 100%);
   filter: drop-shadow(0px -2px 1px #000) drop-shadow(0px -2px 2px #000) drop-shadow(0px -2px 3px #0008) drop-shadow(0px 2px 2px #fff8);
 }
-
 .tilt-toggle .thumb {
   position: absolute;
   width: calc(calc(var(--sz) * 2) - calc(var(--sz) / 8));
@@ -312,9 +323,7 @@ svg { width: 100%; height: 100%; display: block; }
   box-shadow: 0 0 calc(var(--sz) / 3) calc(var(--sz) / -8) var(--lg), 0 0 calc(var(--sz) / 5) calc(var(--sz) / -15) var(--lg) inset, 0 0 calc(var(--sz) / 10) calc(var(--sz) / 50) #000c;
   transition: left var(--sp) ease, box-shadow var(--sp) ease, transform var(--sp) ease;
 }
-
 .tilt-toggle input:checked + label .thumb { --lg: var(--on); left: calc(calc(100% - calc(calc(var(--sz) * 2) - calc(var(--sz) / 3))) - calc(calc( var(--sz) / 10) + calc(var(--sz) / 6))); }
-
 .tilt-toggle .lights { position: absolute; width: calc(100% - calc(var(--sz) * 1.4)); height: calc(var(--sz) / 1.75); display: flex; justify-content: space-between; padding: 0; z-index: 0; margin-top: -1px; }
 .tilt-toggle .lights span { background: #121212; position: relative; width: calc(var(--sz) / 1.75); height: calc(var(--sz) / 1.75); border-radius: var(--sz); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 calc(var(--sz) / 50) calc(var(--sz) / 50) #0008; }
 .tilt-toggle .lights span:after { content: ""; width: calc(100% - calc(var(--sz) / 15)); height: calc(100% - calc(var(--sz) / 15)); position: absolute; background: radial-gradient(circle at 50% 32%, #fff5 0 calc(var(--sz) / 20), #000 calc(var(--sz) / 3) calc(var(--sz) / 3)); border-radius: var(--sz); top: calc(var(--sz) / 50); }
@@ -322,22 +331,7 @@ svg { width: 100%; height: 100%; display: block; }
 .tilt-toggle input:checked + label + .lights .light-off:after { box-shadow: 0 0 calc(var(--sz) / 3) 0 #f5000020; background: radial-gradient(circle at 50% 32%, #fff5 0 calc(var(--sz) / 20), #000 calc(var(--sz) / 3) calc(var(--sz) / 3)); }
 .tilt-toggle .light-on:after { box-shadow: 0 0 calc(var(--sz) / 3) 0 #00f56d20; }
 .tilt-toggle input:checked + label + .lights .light-on:after { --lg: var(--on); box-shadow: 0 0 calc(var(--sz) / 2.5) 0 var(--lg); background: radial-gradient(circle at 50% 32%, #fff 0 calc(var(--sz) / 20), #fff2 calc(var(--sz) / 3) calc(var(--sz) / 3)); }
-
 /* disable animations while pristine */
 .tilt-toggle.tilt-toggle--pristine .thumb { transition: none !important; }
-
-/* transient verbose tooltip (Roboto) */
-.tilt-toggle-verbose{
-  position: fixed; z-index: 1203; max-width: min(360px, calc(100vw - 40px));
-  background: linear-gradient(180deg, rgba(8,32,26,0.96), rgba(6,22,18,0.95)); color: var(--text);
-  padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: 0 18px 40px rgba(0,0,0,0.6); font-family: 'Roboto', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  font-size: 13px; line-height: 1.2; pointer-events: none; opacity: 1; transition: opacity 320ms ease;
-}
-
-/* persistent caption under the toggle (uses same verbose text as the transient tooltip) */
+/* persistent caption under the toggle */
 .tilt-toggle .tilt-toggle-caption{ margin: 0; color: var(--muted); font-family: 'Roboto', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.2; max-width: 30ch; text-align: left; pointer-events: none; z-index: 1202; opacity: 0.95; -webkit-font-smoothing: antialiased; }
-
-/* end toggle styles (adapted) */
-
-

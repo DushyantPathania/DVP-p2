@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cricket Globe • D3</title>
   <link rel="stylesheet" href="styles.css" />
-  <!-- Fancy readable font for UI -->
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 
@@ -15,25 +14,39 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
 </head>
 <body>
-  <!-- Globe / Map canvas -->
   <div id="globe"></div>
 
   <!-- Leaderboard toggle -->
   <button id="menuBtn" class="hamburger" aria-label="Open leaderboard" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
-  <!-- 3D/2D tilt toggle (replaces SVG toggle in map.js) -->
-  <div class="tilt-toggle" aria-label="Toggle 3D/2D view" data-name-globe="3D" data-name-map="2D" data-verbose-globe="Click to view 3D — interactive globe (tilt & rotate)." data-verbose-map="Click to view 2D — flat map (pan & zoom).">
-    <!-- Toggle markup adapted from: https://codepen.io/josetxu/pen/mdQePNo (author: josetxu) -->
+
+  <!-- 3D/2D toggle (visual by josetxu; wired by tilt-toggle.js) -->
+  <div class="tilt-toggle" aria-label="Toggle 3D/2D view" data-name-globe="3D" data-name-map="2D"
+       data-verbose-globe="Click to view 3D — interactive globe (tilt & rotate)."
+       data-verbose-map="Click to view 2D — flat map (pan & zoom).">
     <div class="toggle">
       <input type="checkbox" id="btn" class="tilt-toggle__input" aria-checked="false" aria-label="Toggle 3D/2D">
-      <label for="btn">
-        <span class="thumb" aria-hidden="true"></span>
-      </label>
+      <label for="btn"><span class="thumb" aria-hidden="true"></span></label>
       <div class="lights">
         <span class="light-off" aria-hidden="true"></span>
         <span class="light-on" aria-hidden="true"></span>
       </div>
+    </div>
+  </div>
+
+  <!-- Choropleth + spike legend -->
+  <div id="legend" class="legend" aria-hidden="false">
+    <div class="legend-section">
+      <div class="legend-title">Home win % (by host country)</div>
+      <div class="legend-gradient">
+        <div class="legend-gradbar" id="legendGrad"></div>
+        <div class="legend-scale"><span>0%</span><span>50%</span><span>100%</span></div>
+      </div>
+    </div>
+    <div class="legend-section">
+      <div class="legend-title">Win spikes = matches hosted</div>
+      <svg id="spikeLegend" width="160" height="48"></svg>
     </div>
   </div>
 
@@ -51,11 +64,9 @@
     <div id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0"></div>
   </div>
 
-  <!-- Year range box (bottom, centered) -->
+  <!-- Year range slider -->
   <div id="yearBox" class="year-box" aria-label="Filter by year range">
-    <div class="yr-header">
-      <span id="yearBoxValue">Years 2000–2025</span>
-    </div>
+    <div class="yr-header"><span id="yearBoxValue">Years 2000–2025</span></div>
     <div class="yr-slider">
       <div class="yr-track"></div>
       <div class="yr-fill"></div>
@@ -64,13 +75,13 @@
     </div>
   </div>
 
-  <!-- Toast (loading hint) -->
   <div id="loadingToast" class="toast"></div>
 
   <!-- App scripts -->
   <script src="db.js"></script>
   <script src="venue.js"></script>
   <script src="tilt-toggle.js"></script>
-  <script src="map.js"></script>
+  <!-- cache-bust to avoid stale map.js -->
+  <script src="map.js?v=choro2"></script>
 </body>
 </html>

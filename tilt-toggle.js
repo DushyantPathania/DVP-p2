@@ -1,73 +1,41 @@
-// Toggle helper (visuals adapted from CodePen)
-// Source: https://codepen.io/josetxu/pen/mdQePNo (author: josetxu)
-// - Keeps initial 'pristine' class until first interaction to prevent initial animations
-// - Renders a small persistent caption (verbose) next to the toggle and updates it on change
-// - Exposes syncTiltToggleLabel() for programmatic updates
+// Toggle control behavior
+// - Works with the `.toggle` markup (input id="btn") added to index.html
+// - Hidden on the landing page via CSS; revealed after clicking #enterBtn
+// - Emits a `view-toggle` event on window with { detail: { map: true/false } }
 window.addEventListener('DOMContentLoaded', () => {
-  const el = document.querySelector('.tilt-toggle');
-  if (!el) return;
+  const container = document.querySelector('.toggle');
+  const input = document.getElementById('btn');
+  if (!container || !input) return;
 
-  const input = el.querySelector('.tilt-toggle__input');
-  const labelEl = el.querySelector('label[for="btn"]');
-  const pristine = 'tilt-toggle--pristine';
+  // Mark initial aria-hidden state to reflect landing visibility
+  container.setAttribute('aria-hidden', document.body.classList.contains('landing') ? 'true' : 'false');
 
-  // short names and verbose descriptions (data attributes on container)
-  const nameGlobe = el.dataset.nameGlobe || 'Globe';
-  const nameMap = el.dataset.nameMap || 'Map';
-  const verbose = {
-    globe: el.dataset.verboseGlobe || '3D Globe — tilt, rotate and spin to explore the world.',
-    map: el.dataset.verboseMap || '2D Map — flat, draggable map with zoom for details.'
-  };
-
-  // ensure pristine until first interaction
-  el.classList.add(pristine);
-  if (input) el.classList.toggle('is-checked', !!input.checked);
-
-  // create persistent caption element (if not present) and place it under the toggle
-  let caption = el.querySelector('.tilt-toggle-caption');
-  if (!caption) {
-    caption = document.createElement('div');
-    caption.className = 'tilt-toggle-caption';
-    caption.setAttribute('aria-hidden', 'true');
-    el.appendChild(caption);
-  }
-
-  function updateCaption(){
-    const mode = input && input.checked ? 'map' : 'globe';
-    caption.textContent = mode === 'map' ? verbose.map : verbose.globe;
-  }
-  updateCaption();
-
-  // no transient tooltip: we only keep the persistent caption next to the control
-
-  // sync visual active state and caption
-  function syncLabel(){
-    if (!input) return;
-    // keep a class for CSS hooks and update caption
-    el.classList.toggle('is-checked', !!input.checked);
-    input.setAttribute('aria-checked', input.checked ? 'true' : 'false');
-    updateCaption();
-  }
-  syncLabel();
-
-  // interactions
-
-  if (labelEl) {
-    // remove pristine on pointerdown so the animation classes are enabled before the change event
-    labelEl.addEventListener('pointerdown', () => { el.classList.remove(pristine); });
-  }
-
-  if (input) {
-    input.addEventListener('change', (e) => {
-      el.classList.remove(pristine);
-      syncLabel();
+  // Show the toggle after the user clicks Explore (id: enterBtn)
+  const enterBtn = document.getElementById('enterBtn');
+  if (enterBtn) {
+    enterBtn.addEventListener('click', () => {
+      // If the page removes .landing elsewhere, this will instead be handled by CSS.
+      // We force show the control here to be explicit.
+      container.style.display = '';
+      container.setAttribute('aria-hidden', 'false');
     });
   }
 
-  // helper for programmatic updates
-  window.syncTiltToggleLabel = function(){
-    // remove pristine so programmatic changes animate
-    el.classList.remove(pristine);
-    syncLabel();
-  };
+  // Emit view-toggle events when the checkbox changes
+  input.addEventListener('change', () => {
+    const isMap = !!input.checked;
+    window.dispatchEvent(new CustomEvent('view-toggle', { detail: { map: isMap } }));
+    // update the adjacent label text
+    const lbl = document.getElementById('toggleText');
+    if (lbl) lbl.textContent = isMap ? '2D Map' : '3D Globe';
+  });
+
+  // also update the label when other parts of the app programmatically change mode
+  window.addEventListener('view-mode-sync', (ev) => {
+    const isMap = !!(ev?.detail?.map);
+    const lbl = document.getElementById('toggleText');
+    if (lbl) lbl.textContent = isMap ? '2D Map' : '3D Globe';
+    // also sync checkbox if needed
+    if (input.checked !== isMap) input.checked = isMap;
+  });
 });

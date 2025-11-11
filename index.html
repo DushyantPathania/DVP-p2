@@ -35,13 +35,20 @@
     <span></span><span></span><span></span>
   </button>
 
-  <!-- top-right toggle (credit: https://codepen.io/jkantner/pen/mdjmXNv) -->
-<label class="tilt-toggle tilt-toggle--pristine"
-       title="Click to view 2D — interactive map"
-       data-nameGlobe="Globe" data-nameMap="Map">
-  <input class="tilt-toggle__input" type="checkbox" aria-checked="false" />
-  <span class="tilt-toggle__input-ball"><span class="tilt-toggle__sr">Power</span></span>
-</label>
+  <!-- top-right view toggle (user-provided markup) + dynamic text -->
+  <div class="toggle-wrap" aria-hidden="true">
+    <div id="toggleText" class="toggle-text" aria-hidden="true">3D Globe</div>
+    <div class="toggle">
+      <input type="checkbox" id="btn">
+      <label for="btn">
+        <span class="thumb"></span>
+      </label>
+      <div class="lights">
+        <span class="light-off"></span>
+        <span class="light-on"></span>
+      </div>
+    </div>
+  </div>
 
   <!-- Legend -->
   <div class="legend" aria-live="polite">

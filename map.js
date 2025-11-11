@@ -490,17 +490,30 @@
   const tiltInputEl = document.querySelector('.tilt-toggle__input');
 
   function updateToggleUI(animate=true){
-    if (!tiltInputEl) return;
     const shouldBeChecked = (mode === "map");
-    if (tiltInputEl.checked !== shouldBeChecked) tiltInputEl.checked = shouldBeChecked;
-    tiltInputEl.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
-    const lbl = tiltInputEl.closest && tiltInputEl.closest('.tilt-toggle');
-    if (lbl) {
-      if (animate) lbl.classList.remove('tilt-toggle--pristine');
-      lbl.classList.toggle('is-checked', shouldBeChecked);
-      lbl.setAttribute('title', shouldBeChecked ? (lbl.dataset.nameMap || 'Map') : (lbl.dataset.nameGlobe || 'Globe'));
+
+    // Support legacy tilt-toggle input if present
+    if (tiltInputEl) {
+      if (tiltInputEl.checked !== shouldBeChecked) tiltInputEl.checked = shouldBeChecked;
+      tiltInputEl.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
+      const lbl = tiltInputEl.closest && tiltInputEl.closest('.tilt-toggle');
+      if (lbl) {
+        if (animate) lbl.classList.remove('tilt-toggle--pristine');
+        lbl.classList.toggle('is-checked', shouldBeChecked);
+        lbl.setAttribute('title', shouldBeChecked ? (lbl.dataset.nameMap || 'Map') : (lbl.dataset.nameGlobe || 'Globe'));
+      }
     }
+
+    // New toggle (id="btn") support
+    const newToggle = document.getElementById('btn');
+    if (newToggle) {
+      if (newToggle.checked !== shouldBeChecked) newToggle.checked = shouldBeChecked;
+      newToggle.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
+    }
+
     if (window.syncTiltToggleLabel) window.syncTiltToggleLabel();
+    // notify other UI (toggle label) about the current mode so they can update text
+    window.dispatchEvent(new CustomEvent('view-mode-sync', { detail: { map: shouldBeChecked } }));
   }
 
   if (tiltInputEl) {
@@ -512,6 +525,12 @@
       tiltInputEl.addEventListener(ev, e => e.stopPropagation(), { passive: true })
     );
   }
+
+  // Listen for the new toggle's custom events (dispatched by tilt-toggle.js replacement)
+  window.addEventListener('view-toggle', (ev) => {
+    const isMap = ev?.detail?.map;
+    setMode(isMap ? 'map' : 'globe');
+  });
 
   function setMode(newMode){
     if (newMode === mode) return;

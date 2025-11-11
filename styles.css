@@ -285,7 +285,7 @@ body.choro-on .country.has-venues { fill: inherit; }
 .toggle{ --sz: calc(10vmin * 0.15); --on: #99dc39; --of: #F44336; --lg: var(--of); --sp: 1s; position: fixed; right: 12px; top: 12px; z-index: 1201; }
 
 /* Hide toggle on landing/homepage */
-.toggle-wrap { position: fixed; right: 12px; top: 12px; z-index: 1201; display: flex; align-items: center; gap: 8px; }
+.toggle-wrap { position: fixed; right: 12px; top: 12px; z-index: 1201; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 24px); }
 
 /* Hide toggle on landing/homepage */
 body.landing .toggle-wrap { display: none !important; }
@@ -298,9 +298,21 @@ body.landing .toggle-wrap { display: none !important; }
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1200; /* sit underneath the label so label can appear above if needed */
 }
 
-.toggle-text { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.toggle-text {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.15;
+  margin-right: 12px;
+  z-index: 1300;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 520px){ .toggle-text{ display: none; } }
 
 .toggle input { display: none; }
 

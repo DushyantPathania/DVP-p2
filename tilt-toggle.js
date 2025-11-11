@@ -5,37 +5,45 @@
 window.addEventListener('DOMContentLoaded', () => {
   const container = document.querySelector('.toggle');
   const input = document.getElementById('btn');
-  if (!container || !input) return;
+  const textEl = document.getElementById('toggleText');
+  if (!container || !input || !textEl) return;
 
-  // Mark initial aria-hidden state to reflect landing visibility
+  // Reflect landing visibility in aria states
   container.setAttribute('aria-hidden', document.body.classList.contains('landing') ? 'true' : 'false');
+  textEl.setAttribute('aria-hidden', document.body.classList.contains('landing') ? 'true' : 'false');
 
   // Show the toggle after the user clicks Explore (id: enterBtn)
   const enterBtn = document.getElementById('enterBtn');
   if (enterBtn) {
     enterBtn.addEventListener('click', () => {
-      // If the page removes .landing elsewhere, this will instead be handled by CSS.
-      // We force show the control here to be explicit.
       container.style.display = '';
       container.setAttribute('aria-hidden', 'false');
+      textEl.setAttribute('aria-hidden', 'false');
     });
   }
 
-  // Emit view-toggle events when the checkbox changes
+  // Update the concise label for the toggle. isMap === true => 2D atlas active.
+  function setLabelForMode(isMap){
+    if (!textEl) return;
+    if (isMap) textEl.textContent = '2D atlas — click to switch to 3D globe';
+    else       textEl.textContent = '3D globe — click to switch to 2D atlas';
+  }
+
+  // When the user toggles, emit view-toggle and update label immediately for responsiveness
   input.addEventListener('change', () => {
     const isMap = !!input.checked;
+    setLabelForMode(isMap);
     window.dispatchEvent(new CustomEvent('view-toggle', { detail: { map: isMap } }));
-    // update the adjacent label text
-    const lbl = document.getElementById('toggleText');
-    if (lbl) lbl.textContent = isMap ? '2D Map' : '3D Globe';
   });
 
-  // also update the label when other parts of the app programmatically change mode
+  // Listen for programmatic syncs from map.js and update label & input state
   window.addEventListener('view-mode-sync', (ev) => {
-    const isMap = !!(ev?.detail?.map);
-    const lbl = document.getElementById('toggleText');
-    if (lbl) lbl.textContent = isMap ? '2D Map' : '3D Globe';
-    // also sync checkbox if needed
+    const isMap = !!(ev && ev.detail && ev.detail.map);
     if (input.checked !== isMap) input.checked = isMap;
+    input.setAttribute('aria-checked', isMap ? 'true' : 'false');
+    setLabelForMode(isMap);
   });
+
+  // Initialize label from the current checkbox state
+  setLabelForMode(!!input.checked);
 });

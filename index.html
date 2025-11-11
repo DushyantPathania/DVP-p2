@@ -3,85 +3,103 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cricket Globe • D3</title>
-  <link rel="stylesheet" href="styles.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-
-  <!-- Libs -->
-  <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script src="https://unpkg.com/topojson-client@3"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+  <title>Global Cricket Insights • 2000–2025</title>
+  <link rel="stylesheet" href="styles.css?v=landing2" />
 </head>
-<body>
-  <div id="globe"></div>
+<body class="landing">
+  <!-- Background image layer -->
+  <div id="bgLayer" aria-hidden="true"></div>
 
-  <!-- Leaderboard toggle -->
-  <button id="menuBtn" class="hamburger" aria-label="Open leaderboard" aria-expanded="false">
+    <!-- Globe is OUTSIDE hero so it survives when hero hides -->
+  <div id="globe" role="img" aria-label="Interactive cricket world map"></div>
+
+  <!-- Hero / Landing -->
+  <section class="hero">
+    <div class="hero-left">
+      <h1>Global Cricket Insights</h1>
+      <p>
+        Explore <strong>regional dominance</strong> and <strong>venue &amp; format evolution</strong>
+        across ODI, T20I and Test cricket (2000–2025).
+      </p>
+      <ul class="hero-points">
+        <li>Choropleth: <em>Home win %</em> by host country</li>
+        <li>Win spikes: <em>matches hosted</em> (height)</li>
+        <li>Year filter (bottom) · 2D/3D toggle (top-right) · Click a country for venues</li>
+      </ul>
+      <button id="enterBtn" class="cta">Explore data</button>
+    </div>
+  </section>
+
+  <!-- UI chrome (hidden while landing via CSS) -->
+  <button id="menuBtn" class="hamburger" aria-label="Open leaderboards" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
 
-  <!-- 3D/2D toggle (visual by josetxu; wired by tilt-toggle.js) -->
-  <div class="tilt-toggle" aria-label="Toggle 3D/2D view" data-name-globe="3D" data-name-map="2D"
-       data-verbose-globe="Click to view 3D — interactive globe (tilt & rotate)."
-       data-verbose-map="Click to view 2D — flat map (pan & zoom).">
-    <div class="toggle">
-      <input type="checkbox" id="btn" class="tilt-toggle__input" aria-checked="false" aria-label="Toggle 3D/2D">
-      <label for="btn"><span class="thumb" aria-hidden="true"></span></label>
-      <div class="lights">
-        <span class="light-off" aria-hidden="true"></span>
-        <span class="light-on" aria-hidden="true"></span>
-      </div>
-    </div>
-  </div>
+  <!-- top-right toggle (credit: https://codepen.io/jkantner/pen/mdjmXNv) -->
+<label class="tilt-toggle tilt-toggle--pristine"
+       title="Click to view 2D — interactive map"
+       data-nameGlobe="Globe" data-nameMap="Map">
+  <input class="tilt-toggle__input" type="checkbox" aria-checked="false" />
+  <span class="tilt-toggle__input-ball"><span class="tilt-toggle__sr">Power</span></span>
+</label>
 
-  <!-- Choropleth + spike legend -->
-  <div id="legend" class="legend" aria-hidden="false">
+  <!-- Legend -->
+  <div class="legend" aria-live="polite">
     <div class="legend-section">
       <div class="legend-title">Home win % (by host country)</div>
       <div class="legend-gradient">
-        <div class="legend-gradbar" id="legendGrad"></div>
+        <div class="legend-gradbar"></div>
         <div class="legend-scale"><span>0%</span><span>50%</span><span>100%</span></div>
       </div>
     </div>
     <div class="legend-section">
       <div class="legend-title">Win spikes = matches hosted</div>
-      <svg id="spikeLegend" width="160" height="48"></svg>
+      <svg id="spikeLegend" width="160" height="72"></svg>
     </div>
-  </div>
-
-  <!-- Leaderboard overlay -->
-  <div id="backdrop" class="backdrop" hidden></div>
-  <div id="leaderboardOverlay" class="overlay" hidden aria-hidden="true" role="dialog" aria-modal="true">
-    <div class="overlay-header">
-      <h3 style="margin:0">Leaderboard</h3>
-      <button id="closeOverlay" class="icon-btn">Close</button>
-    </div>
-    <div class="tabs" role="tablist" aria-label="Leaderboard tabs">
-      <button class="tab active" id="tab-batting" data-kind="batting" role="tab" aria-selected="true">Batting</button>
-      <button class="tab" id="tab-bowling" data-kind="bowling" role="tab" aria-selected="false">Bowling</button>
-    </div>
-    <div id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0"></div>
   </div>
 
   <!-- Year range slider -->
-  <div id="yearBox" class="year-box" aria-label="Filter by year range">
-    <div class="yr-header"><span id="yearBoxValue">Years 2000–2025</span></div>
+  <section class="year-box" id="yearBox" aria-label="Years slider">
+    <div class="yr-header">
+      <span id="yearBoxValue">Years 2000–2025</span>
+      <span>2025</span>
+    </div>
     <div class="yr-slider">
       <div class="yr-track"></div>
       <div class="yr-fill"></div>
-      <div class="yr-thumb left"><div id="yrBubbleLeft" class="yr-bubble">2000</div></div>
-      <div class="yr-thumb right"><div id="yrBubbleRight" class="yr-bubble">2025</div></div>
+      <div class="yr-thumb left"  role="slider" aria-valuemin="2000" aria-valuemax="2025" aria-valuenow="2000" tabindex="0">
+        <div class="yr-bubble" id="yrBubbleLeft">2000</div>
+      </div>
+      <div class="yr-thumb right" role="slider" aria-valuemin="2000" aria-valuemax="2025" aria-valuenow="2025" tabindex="0">
+        <div class="yr-bubble" id="yrBubbleRight">2025</div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div id="loadingToast" class="toast"></div>
+  <!-- Toast -->
+  <div id="loadingToast" class="toast">Loading…</div>
 
-  <!-- App scripts -->
-  <script src="db.js"></script>
-  <script src="venue.js"></script>
-  <script src="tilt-toggle.js"></script>
-  <!-- cache-bust to avoid stale map.js -->
-  <script src="map.js?v=choro2"></script>
+  <!-- Overlay (Leaderboards demo) -->
+  <aside id="leaderboardOverlay" class="overlay" hidden aria-hidden="true" aria-labelledby="lbTitle">
+    <header class="overlay-header">
+      <h2 id="lbTitle">Leaderboards (demo)</h2>
+      <button id="closeOverlay" class="icon-btn" aria-label="Close">✕</button>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Leaderboards">
+      <button id="tab-batting" class="tab active" role="tab" aria-selected="true" data-kind="batting">Batting</button>
+      <button id="tab-bowling" class="tab" role="tab" aria-selected="false" data-kind="bowling">Bowling</button>
+    </nav>
+    <div id="tabpanel" class="tab-panel" role="tabpanel" tabindex="0"></div>
+  </aside>
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+  <script src="db.js?v=landing2"></script>
+  <script src="venue.js?v=landing2"></script>
+  <script src="tilt-toggle.js?v=landing2"></script>
+  <script src="map.js?v=landing2"></script>
 </body>
 </html>

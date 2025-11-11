@@ -1,15 +1,16 @@
 /* ============================================================================
    Cricket Globe / Map (D3 v7)
-   - Choropleth: home win % by host country (from SQLite on GitHub)
-   - Spikes: number of matches hosted (height) & home-win% (color)
-   - Slider drives re-query (year range)
-   - 2D / 3D modes share the same layers
-   - No CSV reads anywhere
+   Landing layout: small globe at right + intro text on left.
+   Clicking "Explore data" removes .landing and expands the globe to full screen.
+
+   Choropleth: home win % by host country (from SQLite via sql.js)
+   Spikes: matches hosted (height), colored by win %
+   Slider drives re-query; 2D/3D toggle supported.
    ============================================================================ */
 
 (async function () {
   /* ----------------------------- Config ----------------------------------- */
-  // Remote SQLite DB on GitHub (sql.js fetch)
+  // Prefer raw GitHub (or replace with your local path "./data/db/cricket.db")
   const DB_URL = "https://raw.githubusercontent.com/DushyantPathania/DVP-p2/main/data/db/cricket.db";
 
   const ICON_PATH  = "data/icon/CricketStadium.png";
@@ -25,6 +26,7 @@
   const tabPanel    = document.getElementById("tabpanel");
   const tabBtns     = [document.getElementById("tab-batting"), document.getElementById("tab-bowling")];
   const spikeLegend = document.getElementById("spikeLegend");
+  const enterBtn    = document.getElementById("enterBtn");
 
   // Year slider elements
   const yearBox       = document.getElementById("yearBox");
@@ -48,12 +50,7 @@
   const gVenues    = gRoot.append("g").attr("class", "venues"); // existing feature
   const gUI        = svg.append("g").attr("class", "ui-layer");
 
-  // Venue popup (existing)
-  VenueWindow.init({
-    svg, gRoot,
-    projectionRef: () => projection,
-    modeRef: () => mode
-  });
+  VenueWindow.init({ svg, gRoot, projectionRef: () => projection, modeRef: () => mode });
 
   /* -------------------------- Projections/Path ----------------------------- */
   const graticule = d3.geoGraticule10();
@@ -171,7 +168,7 @@
       .data([boundaryMesh]).join("path").attr("class","boundary").attr("d", path);
 
     applyCountryHighlight();
-    applyChoropleth(); // if data loaded
+    applyChoropleth();
   }
   function applyCountryHighlight() {
     if (!venueCountrySet || venueCountrySet.size === 0) return;
@@ -188,9 +185,9 @@
   let schemaCache = null;
   async function getVenueSchema() {
     if (schemaCache) return schemaCache;
-    await DB.init(DB_URL);
+    await DB.init(DB_URL); // load via sql.js (your db.js can internally use IndexedDB cache)
 
-    // Sanity logs — confirm remote DB is used (no hard-coded table names)
+    // Sanity logs
     try {
       const tnames = DB.queryAll("SELECT name FROM sqlite_master WHERE type='table'");
       console.info("[DB] tables:", tnames.map(r => r.name));
@@ -269,7 +266,6 @@
   /* ------------------------------ Choropleth & Spikes ---------------------- */
   function yClause() { return "CAST(substr(date,1,4) AS INT) BETWEEN ? AND ?"; }
 
-  // Discover “matches-like” tables by synonyms and return mappings
   async function loadMatchTables() {
     const names = DB.queryAll("SELECT name FROM sqlite_master WHERE type='table'")
                     .map(r => r.name).filter(Boolean);
@@ -299,7 +295,6 @@
       console.warn("[CHORO] No matches-like table found. Need (winner, date, venue_country/host/country).");
     } else {
       try {
-        // Build a union across all matches-like tables with standardized aliases
         const unionParts = tables.map(t => {
           const m = t.map;
           const neutralExpr = m.neutralCol ? `COALESCE(${m.neutralCol},0)` : "0";
@@ -327,7 +322,6 @@
       }
     }
 
-    // Aggregate -> {matches, homeWins, winPct}
     const agg = new Map();
     for (const r of rows) {
       const y = +(String(r.date).slice(0,4));
@@ -534,7 +528,6 @@
       resize(); redrawAll(); startSpin();
     }
     updateToggleUI(true);
-    // spike range tweak per mode
     const maxMatches = d3.max(Array.from(choroByCountry.values()||[]), d => d.matches) || 1;
     spikeScale.range([0, mode==="globe" ? 32 : 40]);
     updateSpikesPosition();
@@ -542,7 +535,9 @@
 
   /* ------------------------------- Resize ---------------------------------- */
   function resize(){
-    const width = window.innerWidth, height = window.innerHeight;
+    const rect = container.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
     svg.attr("width", width).attr("height", height);
     if (mode === "globe") {
       const size = Math.min(width, height);
@@ -568,7 +563,7 @@
     }
   });
 
-  /* --------------------------- Overlay (Leaderboard) ----------------------- */
+  /* --------------------------- Overlay (Leaderboards) ---------------------- */
   function openOverlay(){ overlay.hidden=false; backdrop.hidden=false;
     overlay.classList.add("open"); backdrop.classList.add("open"); btnMenu.classList.add("open");
     btnMenu.setAttribute("aria-expanded","true"); overlay.setAttribute("aria-hidden","false");
@@ -628,7 +623,8 @@
     });
   }
   async function focusMapOn(feature){
-    const width = +svg.attr("width"), height = +svg.attr("height");
+    const rect = container.getBoundingClientRect();
+    const width = rect.width, height = rect.height;
     const b = path.bounds(feature), dx = b[1][0]-b[0][0], dy = b[1][1]-b[0][1];
     const x = (b[0][0]+b[1][0])/2, y = (b[0][1]+b[1][1])/2;
     const m = 0.85, s = Math.max(1, Math.min(12, m/Math.max(dx/width, dy/height)));
@@ -715,6 +711,16 @@
   ["pointerdown","mousedown","touchstart","wheel"].forEach(ev =>
     yearBox?.addEventListener(ev, e => e.stopPropagation(), { passive: true })
   );
+
+  // landing → full view
+  enterBtn?.addEventListener("click", () => {
+  document.body.classList.remove("landing"); // show UI, hero hidden
+  setMode("globe");                           // ensure globe mode
+  requestAnimationFrame(() => {               // reflow after hero hides
+    resize();
+    startSpin();
+  });
+});
 
   // slider init & wiring
   initYearBox(false);

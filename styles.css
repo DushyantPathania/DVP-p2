@@ -1,36 +1,16 @@
 /* ===== Reset / Base ====================================================== */
-html, body { height: 100%; margin: 0; overflow: hidden; }
+html, body { height: 100%; margin: 0; }
 body {
+  overflow: hidden;
   overscroll-behavior: none;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif;
   background:
-    linear-gradient(180deg, rgba(0,0,0, calc(var(--bg-dim) * 0.28)), rgba(0,0,0, calc(var(--bg-dim) * 0.42))),
-    radial-gradient(900px 600px at 12% 10%, rgba(255,255,255, calc(var(--bg-dim) * 0.025)), transparent 50%),
-    repeating-linear-gradient(90deg, rgba(255,255,255, calc(var(--bg-dim) * 0.006)) 0px, rgba(255,255,255, calc(var(--bg-dim) * 0.006)) 1px, transparent 1px, transparent 60px),
-    linear-gradient(180deg, rgba(4,24,36, calc(var(--bg-dim) * 0.55)) 0%, rgba(7,18,26, calc(var(--bg-dim) * 0.55)) 60%, rgba(2,16,23, calc(var(--bg-dim) * 0.55)) 100%),
-    url("data/icon/bg.jpg");
-  background-repeat: no-repeat;
-  background-position: center center;
-  background-size: cover;
+    linear-gradient(180deg, rgba(0,0,0,0.28), rgba(0,0,0,0.42)),
+    linear-gradient(180deg, rgba(4,24,36,0.55) 0%, rgba(7,18,26,0.55) 60%, rgba(2,16,23,0.55) 100%);
+  color: #fffdf5;
 }
 
-/* subtle cricket silhouette */
-body::before{
-  content: "";
-  position: fixed;
-  left: 2%;
-  bottom: 6%;
-  width: 14vmin;
-  height: 14vmin;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><g fill='%23ffffff' opacity='0.14'><rect x='24' y='6' width='2' height='40' /><rect x='30' y='6' width='2' height='40' /><rect x='36' y='6' width='2' height='40' /><rect x='20' y='4' width='24' height='2' rx='1' /></g></svg>");
-  background-repeat: no-repeat;
-  background-size: contain;
-  pointer-events: none;
-  mix-blend-mode: overlay;
-  opacity: calc(var(--bg-dim) * 0.6);
-}
-
-/* ===== Theme vars (cricket-ish) ========================================= */
+/* ===== Theme vars ======================================================== */
 :root{
   --bg-brightness: 0.69;
   --bg-dim: calc(1 - var(--bg-brightness));
@@ -51,60 +31,112 @@ body::before{
   --muted: #b9dace;
   --accent: #ff8a00;
 
-  /* choropleth palette stops (0 -> 0.5 -> 1) */
-  --choro-low: #e64a19;     /* low home win% (reddish) */
-  --choro-mid: #f7e082;     /* mid */
-  --choro-high:#2e7d32;     /* high (green) */
+  --choro-low: #e64a19;
+  --choro-mid: #f7e082;
+  --choro-high:#2e7d32;
 }
 
-/* ===== Canvas ============================================================ */
-#globe { width: 100vw; height: 100vh; cursor: grab; }
-#globe:active { cursor: grabbing; }
-#globe, #globe svg { touch-action: none; }
-svg { width: 100%; height: 100%; display: block; }
+/* ===== Landing / Hero ==================================================== */
+.hero {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr min(48vw, 640px);
+  align-items: center;
+  gap: 24px;
+  padding: 32px;
+  z-index: 5;
+  pointer-events: none;
+}
+.hero-left, .hero-right { pointer-events: auto; }
+
+.hero-left {
+  max-width: 720px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  color: var(--text);
+  padding: 20px 22px;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+}
+.hero-left h1 { margin: 0 0 8px; font-size: clamp(24px, 3vw, 40px); line-height: 1.1; }
+.hero-left p { margin: 0 0 10px; color: var(--muted); }
+.hero-points { margin: 8px 0 14px 20px; color: var(--text); }
+.hero-points li { margin: 4px 0; }
+
+.cta {
+  display: inline-block;
+  background: var(--accent);
+  color: #1a1a1a;
+  font-weight: 700;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+}
+.cta:hover { filter: brightness(1.05); }
+
+/* While landing: make the globe small on the right (globe is outside .hero) */
+body.landing #globe {
+  position: fixed;
+  right: 32px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(48vw, 640px);
+  height: min(48vw, 640px);
+  border-radius: 50%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  overflow: hidden;
+  z-index: 4;
+}
+
+/* When not landing, #globe goes fullscreen */
+body:not(.landing) .hero { display: none; }
+body:not(.landing) #globe { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+
+/* Hide chrome while landing */
+body.landing .legend,
+body.landing .year-box,
+body.landing .hamburger,
+body.landing .tilt-toggle,
+body.landing #leaderboardOverlay,
+body.landing #backdrop { display: none !important; }
 
 /* ===== Map layers ======================================================== */
+#globe { width: 100%; height: 100%; }
+svg { width: 100%; height: 100%; display: block; }
+
 .sphere   { fill: var(--ocean); stroke: var(--ocean-stroke); stroke-width: 1px; }
 .graticule{ fill: none; stroke: var(--graticule); stroke-opacity: 0.55; stroke-width: 0.5px; pointer-events: none; }
 .boundary { fill: none; stroke: var(--boundary-stroke); stroke-width: 0.5px; pointer-events: none; }
 
 .country {
   fill: var(--land); stroke: var(--land-stroke); stroke-width: 0.6px; pointer-events: all;
-  transition: transform 140ms ease, fill 140ms ease, stroke 140ms ease,
-              stroke-width 140ms ease, filter 140ms ease;
+  transition: transform 140ms ease, fill 140ms ease, stroke 140ms ease, stroke-width 140ms ease, filter 140ms ease;
 }
 .country.hovered {
   fill: var(--hover-fill); stroke: var(--hover-stroke); stroke-width: 1.1px;
   filter: drop-shadow(0 0 6px var(--hover-shadow));
 }
-/* When choropleth is active, keep the venue glow but don't override fill */
-.country.has-venues {
-  fill: #fff3d6;
-  filter: drop-shadow(0 0 6px rgba(255, 235, 150, 0.35));
-}
+.country.has-venues { fill: #fff3d6; filter: drop-shadow(0 0 6px rgba(255,235,150,0.35)); }
 body.choro-on .country.has-venues { fill: inherit; }
 
-/* Spikes */
 .spike {
   stroke: rgba(255,255,255,0.9);
-  stroke-width: 2px;
-  stroke-linecap: round;
-  pointer-events: none;
+  stroke-width: 2px; stroke-linecap: round; pointer-events: none;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
 }
 
-/* Venue markers (SVG <image>) */
 .venue-icon{
   pointer-events: auto;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 120ms ease, opacity 120ms ease;
-  cursor: pointer;
+  transform-box: fill-box; transform-origin: center;
+  transition: transform 120ms ease, opacity 120ms ease; cursor: pointer;
 }
 .venue-icon:hover { transform: scale(1.12); }
 
-/* ===== Hamburger (top-left) ============================================= */
+/* ===== Hamburger ========================================================= */
 .hamburger {
   position: fixed; left: 16px; top: 16px; width: 44px; height: 44px; border-radius: 10px;
   display: grid; place-items: center; background: #134e4a; border: 1px solid rgba(255,255,255,0.2);
@@ -122,8 +154,8 @@ body.choro-on .country.has-venues { fill: inherit; }
 /* ===== Legend ============================================================ */
 .legend{
   position: fixed; left: 16px; bottom: 18px; z-index: 8;
-  width: min(320px, calc(100vw - 32px));
-  background: rgba(6, 29, 22, 0.92);
+  width: min(360px, calc(100vw - 32px));
+  background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
   color: var(--text);
@@ -141,11 +173,9 @@ body.choro-on .country.has-venues { fill: inherit; }
 }
 .legend-scale{ display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 
-/* ===== Backdrop & Overlay =============================================== */
-.backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.28); z-index: 6;
-  opacity: 0; transition: opacity 180ms ease;
-}
+/* ===== Overlay, Tabs, Table ============================================= */
+.backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.28); z-index: 6;
+  opacity: 0; transition: opacity 180ms ease; }
 .backdrop.open { opacity: 1; }
 
 .overlay {
@@ -165,23 +195,15 @@ body.choro-on .country.has-venues { fill: inherit; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid var(--panel-border);
 }
-.icon-btn {
-  background: transparent; color: var(--text); border: 1px solid var(--panel-border);
-  border-radius: 8px; padding: 6px 10px; cursor: pointer;
-}
+.icon-btn { background: transparent; color: var(--text); border: 1px solid var(--panel-border);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer; }
 .icon-btn:hover { filter: brightness(1.1); }
 
-/* Tabs */
-.tabs {
-  display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--panel-border);
-}
-.tab {
-  padding: 8px 12px; border-radius: 10px; background: #0f3b2e; color: var(--text);
-  border: 1px solid var(--panel-border); cursor: pointer; font-weight: 600;
-}
+.tabs { display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--panel-border); }
+.tab { padding: 8px 12px; border-radius: 10px; background: #0f3b2e; color: var(--text);
+  border: 1px solid var(--panel-border); cursor: pointer; font-weight: 600; }
 .tab.active, .tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
 
-/* Table area */
 .tab-panel { padding: 10px 12px 16px; overflow: auto; }
 .lb-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 .lb-table th, .lb-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -189,35 +211,7 @@ body.choro-on .country.has-venues { fill: inherit; }
 .lb-table tr:nth-child(1) td { font-weight: 700; color: #ffe082; }
 .lb-meta { color: var(--muted); font-size: 0.85rem; }
 
-/* ===== Venue Window ======================================================= */
-#venue-window{
-  position: fixed; z-index: 20; left: 0; top: 0;
-  width: 360px; max-width: min(92vw, 420px);
-  min-height: 200px; display: none;
-  background: var(--panel-bg); color: var(--text);
-  border: 1px solid var(--panel-border); border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
-  pointer-events: auto; overflow: hidden;
-}
-.venue-header{
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 12px; border-bottom: 1px solid var(--panel-border); gap: 8px;
-}
-.venue-title{ margin: 0; font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.venue-badge{ font-size: 12px; padding: 2px 6px; border: 1px solid var(--panel-border); border-radius: 999px; opacity: .85; }
-.venue-close{ border: 1px solid var(--panel-border); background: transparent; color: var(--text); border-radius: 8px; line-height: 1; width: 28px; height: 28px; cursor: pointer; font-size: 18px; }
-
-.venue-content{
-  padding: 10px 12px 12px;
-  display: grid; grid-template-columns: 1fr;
-  gap: 10px; max-height: 60vh; overflow: auto;
-}
-.venue-card{
-  border: 1px dashed rgba(255,255,255,0.18); border-radius: 10px;
-  color: var(--muted); display: grid; place-items: center; min-height: 72px;
-}
-
-/* ===== Year Box (bottom slider) ========================================== */
+/* ===== Year Box (slider) ================================================= */
 .year-box{
   position: fixed;
   left: 50%;
@@ -225,17 +219,15 @@ body.choro-on .country.has-venues { fill: inherit; }
   transform: translateX(-50%);
   width: min(1100px, calc(100vw - 32px));
   padding: 16px 18px 22px;
-  background: rgba(6, 29, 22, 0.92);
+  background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 16px;
   box-shadow: 0 30px 80px rgba(0,0,0,0.45);
   z-index: 8;
   color: var(--text);
 }
-.year-box .yr-header{
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 10px; color: var(--muted); font-weight: 600; font-size: 0.95rem;
-}
+.year-box .yr-header{ display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; color: var(--muted); font-weight: 600; font-size: 0.95rem; }
 
 .yr-slider{ position: relative; height: 48px; }
 .yr-track{
@@ -289,49 +281,145 @@ body.choro-on .country.has-venues { fill: inherit; }
 }
 .toast.show { opacity: 1; }
 
-/* --- Toggle styled after CodePen example: https://codepen.io/josetxu/pen/mdQePNo (author: josetxu) --- */
-.tilt-toggle{
-  position: fixed; top: 16px; right: 64px; z-index: 1201;
-  transform: translateX(12px);
-  will-change: transform;
-  --sz: calc(3.2vmin * 0.56);
-  --on: #99dc39; --of: #F44336; --lg: var(--of); --sp: 300ms;
+/* ===== Minimal toggle from CodePen (credit: jkantner) ==================== */
+.tilt-toggle,
+.tilt-toggle__input { position: fixed; right: 16px; top: 16px; z-index: 1201; -webkit-tap-highlight-color: transparent; }
+.tilt-toggle { perspective: 480px; }
+.tilt-toggle__input,
+.tilt-toggle__input:before,
+.tilt-toggle__input:after,
+.tilt-toggle__input-ball { animation: tiltOffA 0.6s ease-in-out forwards; display: block; }
+.tilt-toggle__input,
+.tilt-toggle__input:before,
+.tilt-toggle__input:after { border-radius: 0.75em; }
+.tilt-toggle__input {
+  background-image:
+    linear-gradient(90deg,hsla(223,90%,40%,0) 20%,hsla(223,90%,40%,0.5) 30% 70%,hsl(223,90%,40%) 80%),
+    linear-gradient(hsl(223,90%,80%) 33%,hsl(223,90%,30%) 67%);
+  filter: grayscale(0.9);
+  outline: transparent; width: 3em; height: 1.5em; appearance: none;
 }
-.tilt-toggle * { box-sizing: border-box; }
-.tilt-toggle { display: flex; align-items: center; gap: 10px; flex-direction: row-reverse; }
-.tilt-toggle .toggle { position: relative; width: calc(var(--sz) * 5.2); height: calc(var(--sz) * 2); display: flex; align-items: center; justify-content: center; }
-.tilt-toggle input { display: none; }
-.tilt-toggle label[for=btn] {
-  position: absolute; width: calc(var(--sz) * 5.2); height: calc(var(--sz) * 2);
-  background: linear-gradient(0deg, #12172080, #0d121780);
-  border-radius: var(--sz);
-  display: flex; align-items: center; justify-content: center;
-  padding: calc(var(--sz) / 8);
+.tilt-toggle__input:before,
+.tilt-toggle__input:after { content: ""; position: absolute; }
+.tilt-toggle__input:before {
+  animation-name: tiltOffB; background-color: #2e7d32;
+  box-shadow: 0 0 max(1px,0.05em) max(1px,0.05em) #2e7d32;
+  top: 0.125em; left: 0.125em; width: calc(100% - 0.25em); height: calc(100% - 0.25em);
 }
-.tilt-toggle label[for=btn]:before {
-  content: ""; position: absolute; width: 100%; height: 100%; border-radius: var(--sz);
-  background: radial-gradient(circle at 50% calc(var(--sz) / 0.0845), #fff0 calc(var(--sz) / 0.1), #121212 calc(calc(var(--sz) / 0.1) + 1px) calc(var(--sz) / 0.0875), #fff0 calc(calc(var(--sz) / 0.0875) + 1px) 100%), radial-gradient(circle at 50% calc(var(--sz) / -0.1015), #fff0 calc(var(--sz) / 0.1), #121212 calc(calc(var(--sz) / 0.1) + 1px) calc(var(--sz) / 0.0875), #fff0 calc(calc(var(--sz) / 0.0875) + 1px) 100%);
-  filter: drop-shadow(0px -2px 1px #000) drop-shadow(0px -2px 2px #000) drop-shadow(0px -2px 3px #0008) drop-shadow(0px 2px 2px #fff8);
+.tilt-toggle__input:after {
+  animation-name: shadowOff; background-color: hsla(223,90%,10%,0.7); filter: blur(0.1em);
+  top: 0.2em; left: 0.2em; width: 100%; height: 100%; transform-origin: 0.75em 50%; z-index: -1;
 }
-.tilt-toggle .thumb {
+.tilt-toggle__input-ball {
+  animation-name: rollOff; background-color: #fff; border-radius: 50%;
+  box-shadow: -0.05em -0.05em 0.1em hsl(223,10%,80%) inset, -0.25em -0.25em 0.25em hsl(223,10%,60%) inset,
+              0.15em 0.15em 0.0625em hsla(223,10%,10%,0.7);
+  position: absolute; top: 0.25em; left: calc(50% - 0.5em); width: 1em; height: 1em;
+  transform: translate3d(-0.75em,0,0.3em);
+}
+.tilt-toggle__sr { overflow: hidden; position: absolute; width: 1px; height: 1px; }
+.tilt-toggle__input:checked { animation-name: tiltOnA; filter: grayscale(0); }
+.tilt-toggle__input:checked:before { animation-name: tiltOnB; }
+.tilt-toggle__input:checked:after  { animation-name: shadowOn; transform-origin: calc(100% - 0.75em) 50%; }
+.tilt-toggle__input:checked + .tilt-toggle__input-ball { animation-name: rollOn; transform: translate3d(0.75em,0,0.3em); }
+.tilt-toggle--pristine .tilt-toggle__input, .tilt-toggle--pristine .tilt-toggle__input:before,
+.tilt-toggle--pristine .tilt-toggle__input:after, .tilt-toggle--pristine .tilt-toggle__input-ball { animation: none; }
+@keyframes shadowOn { from { transform: skewY(0); } 50% { transform: skewY(-10deg); } to { transform: skewY(0); } }
+@keyframes shadowOff { from { transform: skewY(0); } 50% { transform: skewY(10deg); } to { transform: skewY(0); } }
+@keyframes rollOn { from { transform: rotateY(0) translate3d(-0.75em,0,0.3em) rotateY(0); }
+  50% { transform: rotateY(20deg) translate3d(0.75em,0,0.3em) rotateY(-20deg); }
+  to { transform: rotateY(0) translate3d(0.75em,0,0.3em) rotateY(0); } }
+@keyframes rollOff { from { transform: rotateY(0) translate3d(0.75em,0,0.3em) rotateY(0); }
+  50% { transform: rotateY(-20deg) translate3d(-0.75em,0,0.3em) rotateY(20deg); }
+  to { transform: rotateY(0) translate3d(-0.75em,0,0.3em) rotateY(0); } }
+@keyframes tiltOnA { from { filter: grayscale(0.9); transform: rotateY(0); }
+  50% { filter: grayscale(0); transform: rotateY(20deg); } to { filter: grayscale(0); transform: rotateY(0); } }
+@keyframes tiltOffA { from { filter: grayscale(0); transform: rotateY(0); }
+  50% { filter: grayscale(0.9); transform: rotateY(-20deg); } to { filter: grayscale(0.9); transform: rotateY(0); } }
+@keyframes tiltOnB { from { transform: translate3d(0,0,0); } 50% { transform: translate3d(0.0625em,0,0); } to { transform: translate3d(0,0,0); } }
+@keyframes tiltOffB { from { transform: translate3d(0,0,0); } 50% { transform: translate3d(-0.0625em,0,0); } to { transform: translate3d(0,0,0); } }
+
+
+/* --- Ensure the gradient always shows behind all fixed layers --- */
+html, body { background: transparent; }
+body::before{
+  content:"";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.28), rgba(0,0,0,0.42)),
+    linear-gradient(180deg, rgba(4,24,36,0.55) 0%, rgba(7,18,26,0.55) 60%, rgba(2,16,23,0.55) 100%);
+}
+
+/* --- Make sure the globe doesn't paint an opaque bg --- */
+#globe, #globe svg { background: transparent; }
+
+/* --- If you still have `.hero-right #globe`, replace it with this: --- */
+body.landing #globe{
+  position: fixed;
+  right: 32px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(48vw, 640px);
+  height: min(48vw, 640px);
+  border-radius: 50%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  overflow: hidden;
+  z-index: 4;
+}
+/* ===== Fixed background image layer ===== */
+#bgLayer{
+  position: fixed;
+  inset: 0;
+  z-index: 0;                /* stays behind everything */
+  background-image: url("data/icon/bg.jpg");  /* path relative to index.html/css */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Optional darkening/gradient overlay on the image */
+#bgLayer::after{
+  content: "";
   position: absolute;
-  width: calc(calc(var(--sz) * 2) - calc(var(--sz) / 8));
-  height: calc(calc(var(--sz) * 2) - calc(var(--sz) / 8));
-  left: calc(calc( var(--sz) / 10) + calc(var(--sz) / -30));
-  background: linear-gradient(0deg, #212121, #fff0 35% 65%, #474747);
-  border-radius: var(--sz); cursor: pointer; z-index: 2;
-  box-shadow: 0 0 calc(var(--sz) / 3) calc(var(--sz) / -8) var(--lg), 0 0 calc(var(--sz) / 5) calc(var(--sz) / -15) var(--lg) inset, 0 0 calc(var(--sz) / 10) calc(var(--sz) / 50) #000c;
-  transition: left var(--sp) ease, box-shadow var(--sp) ease, transform var(--sp) ease;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.28), rgba(0,0,0,0.42)),
+    linear-gradient(180deg, rgba(4,24,36,0.55) 0%, rgba(7,18,26,0.55) 60%, rgba(2,16,23,0.55) 100%);
 }
-.tilt-toggle input:checked + label .thumb { --lg: var(--on); left: calc(calc(100% - calc(calc(var(--sz) * 2) - calc(var(--sz) / 3))) - calc(calc( var(--sz) / 10) + calc(var(--sz) / 6))); }
-.tilt-toggle .lights { position: absolute; width: calc(100% - calc(var(--sz) * 1.4)); height: calc(var(--sz) / 1.75); display: flex; justify-content: space-between; padding: 0; z-index: 0; margin-top: -1px; }
-.tilt-toggle .lights span { background: #121212; position: relative; width: calc(var(--sz) / 1.75); height: calc(var(--sz) / 1.75); border-radius: var(--sz); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 calc(var(--sz) / 50) calc(var(--sz) / 50) #0008; }
-.tilt-toggle .lights span:after { content: ""; width: calc(100% - calc(var(--sz) / 15)); height: calc(100% - calc(var(--sz) / 15)); position: absolute; background: radial-gradient(circle at 50% 32%, #fff5 0 calc(var(--sz) / 20), #000 calc(var(--sz) / 3) calc(var(--sz) / 3)); border-radius: var(--sz); top: calc(var(--sz) / 50); }
-.tilt-toggle .light-off:after { box-shadow: 0 0 calc(var(--sz) / 2.5) 0 var(--lg); background: radial-gradient(circle at 50% 32%, #fff 0 calc(var(--sz) / 20), #fff8 calc(var(--sz) / 3) calc(var(--sz) / 3)); }
-.tilt-toggle input:checked + label + .lights .light-off:after { box-shadow: 0 0 calc(var(--sz) / 3) 0 #f5000020; background: radial-gradient(circle at 50% 32%, #fff5 0 calc(var(--sz) / 20), #000 calc(var(--sz) / 3) calc(var(--sz) / 3)); }
-.tilt-toggle .light-on:after { box-shadow: 0 0 calc(var(--sz) / 3) 0 #00f56d20; }
-.tilt-toggle input:checked + label + .lights .light-on:after { --lg: var(--on); box-shadow: 0 0 calc(var(--sz) / 2.5) 0 var(--lg); background: radial-gradient(circle at 50% 32%, #fff 0 calc(var(--sz) / 20), #fff2 calc(var(--sz) / 3) calc(var(--sz) / 3)); }
-/* disable animations while pristine */
-.tilt-toggle.tilt-toggle--pristine .thumb { transition: none !important; }
-/* persistent caption under the toggle */
-.tilt-toggle .tilt-toggle-caption{ margin: 0; color: var(--muted); font-family: 'Roboto', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.2; max-width: 30ch; text-align: left; pointer-events: none; z-index: 1202; opacity: 0.95; -webkit-font-smoothing: antialiased; }
+#globe,
+.legend,
+.year-box,
+.hamburger,
+.tilt-toggle,
+#leaderboardOverlay,
+#backdrop {
+  z-index: 1;
+}
+
+/* Ensure the SVG/globe never paints an opaque fill */
+#globe, #globe svg { background: transparent; }
+
+/* If your body had a background, make it transparent now (bg is handled by #bgLayer) */
+body { background: transparent; }
+
+
+/* Placement + sizing so it never inherits hero text size/baseline */
+.tilt-toggle{
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  z-index: 1201;
+  font-size: 16px;      /* forces em-based toggle to a known size */
+  line-height: 0;       /* avoid inline baseline gaps */
+  display: inline-block;
+}
+@media (max-width: 520px){
+  .tilt-toggle{ right: 10px; top: 10px; font-size: 14px; }
+}
+
+/* Ensure the input renders as a custom control everywhere */
+.tilt-toggle__input{ -webkit-appearance: none; appearance: none; }

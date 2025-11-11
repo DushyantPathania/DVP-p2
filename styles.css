@@ -99,7 +99,6 @@ body:not(.landing) #globe { position: fixed; inset: 0; width: 100vw; height: 100
 body.landing .legend,
 body.landing .year-box,
 body.landing .hamburger,
-body.landing .tilt-toggle,
 body.landing #leaderboardOverlay,
 body.landing #backdrop { display: none !important; }
 
@@ -445,4 +444,4 @@ body { background: transparent; }
 
 
 /* Placement + sizing so it never inherits hero text size/baseline */
-.ui-toggle__input{ -webkit-appearance: none; appearance: none; }
+/* legacy ui-toggle reset removed (not used) */

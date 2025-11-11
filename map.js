@@ -487,22 +487,12 @@
     .on("zoom", (event) => { mapZoomK = event.transform.k; gRoot.attr("transform", event.transform); });
 
   /* ----------------------------- Mode Toggle ------------------------------- */
-  const tiltInputEl = document.querySelector('.tilt-toggle__input');
+  // legacy tilt input removed; new toggle uses #btn and events
 
   function updateToggleUI(animate=true){
     const shouldBeChecked = (mode === "map");
 
-    // Support legacy tilt-toggle input if present
-    if (tiltInputEl) {
-      if (tiltInputEl.checked !== shouldBeChecked) tiltInputEl.checked = shouldBeChecked;
-      tiltInputEl.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
-      const lbl = tiltInputEl.closest && tiltInputEl.closest('.tilt-toggle');
-      if (lbl) {
-        if (animate) lbl.classList.remove('tilt-toggle--pristine');
-        lbl.classList.toggle('is-checked', shouldBeChecked);
-        lbl.setAttribute('title', shouldBeChecked ? (lbl.dataset.nameMap || 'Map') : (lbl.dataset.nameGlobe || 'Globe'));
-      }
-    }
+    // legacy tilt-toggle handling removed; new toggle (#btn) handled below
 
     // New toggle (id="btn") support
     const newToggle = document.getElementById('btn');
@@ -511,20 +501,11 @@
       newToggle.setAttribute('aria-checked', shouldBeChecked ? 'true' : 'false');
     }
 
-    if (window.syncTiltToggleLabel) window.syncTiltToggleLabel();
-    // notify other UI (toggle label) about the current mode so they can update text
-    window.dispatchEvent(new CustomEvent('view-mode-sync', { detail: { map: shouldBeChecked } }));
+  // notify other UI (toggle label) about the current mode so they can update text
+  window.dispatchEvent(new CustomEvent('view-mode-sync', { detail: { map: shouldBeChecked } }));
   }
 
-  if (tiltInputEl) {
-    tiltInputEl.addEventListener('change', (e) => {
-      const nm = e.target.checked ? 'map' : 'globe';
-      setMode(nm);
-    });
-    ["pointerdown","mousedown","touchstart","wheel"].forEach(ev =>
-      tiltInputEl.addEventListener(ev, e => e.stopPropagation(), { passive: true })
-    );
-  }
+  // legacy tilt input event handlers removed
 
   // Listen for the new toggle's custom events (dispatched by tilt-toggle.js replacement)
   window.addEventListener('view-toggle', (ev) => {

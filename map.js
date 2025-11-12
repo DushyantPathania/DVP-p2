@@ -27,6 +27,8 @@
   const tabBtns     = [document.getElementById("tab-batting"), document.getElementById("tab-bowling")];
   let spikeLegend = null; // created dynamically by createLegendUI()
   let spikeLegendSection = null;
+  let bubbleLegend = null;
+  let bubbleLegendSection = null;
   const enterBtn    = document.getElementById("enterBtn");
 
   // Year slider elements
@@ -49,6 +51,9 @@
   const gBoundary  = gRoot.append("g");
   const gSpikes    = gRoot.append("g").attr("class", "spikes");
   const gVenues    = gRoot.append("g").attr("class", "venues"); // existing feature
+  // Flow arcs (globe-only) and proportional bubbles (map-only)
+  const gFlowArcs  = gRoot.append("g").attr("class", "flows");
+  const gBubbles   = gRoot.append("g").attr("class", "bubbles");
   const gUI        = svg.append("g").attr("class", "ui-layer");
 
   VenueWindow.init({ svg, gRoot, projectionRef: () => projection, modeRef: () => mode });
@@ -199,6 +204,17 @@
   // and increase the maximum pixel range so spikes are more visible on the globe.
   let spikeScale      = d3.scaleLinear().domain([0,1]).range([0, 40]);
 
+  // Flow & bubble data (derived from matches table)
+  let flowData = [];   // { originKey, hostKey, originLon, originLat, hostLon, hostLat, matches }
+  let bubbleData = []; // { key, lon, lat, matches }
+  // flow visibility + per-origin color/filter
+  let flowVisible = false; // default: do not show flows
+  let countryColorScale = d3.scaleOrdinal(d3.schemeTableau10);
+  let countryColors = new Map(); // originKey -> color
+  let selectedFlowCountries = new Set(); // empty == all
+  let bubbleMetric = (function(){ try{ return localStorage.getItem('bubbleMetric') || 'matches'; } catch(e){ return 'matches'; } })();
+  // (rivalry-specific UI removed; flows are controlled by the single flow dropdown)
+
   /* ----------------------------- Demo leaderboard -------------------------- */
   const battingData = [
     { player:"Player A", team:"IND", runs:945, sr:142.3, avg:52.5 },
@@ -268,6 +284,8 @@
     t20: ["#fff0f7", "#f07fbf", "#7a0177"],  // pink -> magenta -> purple
     test:["#fff7e6", "#f4b942", "#8b4513"]   // pale -> ochre -> brown
   };
+  // spike color used for vertical 'spike' lines and legend — use a bright red for visibility
+  const SPIKE_COLOR = '#ff0000';
   let selectedFormat = 'all';
   // expose selected format globally so other modules (venue popup) can read it
   window.selectedFormat = selectedFormat;
@@ -563,6 +581,7 @@
 
     choroByCountry = agg;
     choroActive = agg.size > 0;
+  try { console.info('[CHORO] choroByCountry size:', choroByCountry.size); const samp = Array.from(choroByCountry.entries()).slice(0,6).map(([k,v])=>({k,v: {matches:v.matches, homeWins:v.homeWins, winPct: v.winPct}})); console.info('[CHORO] sample:', samp); } catch(e){}
 
     // compute max matches for selected format
     const maxMatches = d3.max(Array.from(agg.values()), d => {
@@ -576,15 +595,26 @@
     renderSpikeLegend(maxMatches);
     applyChoropleth();
     drawSpikes();
+    // recompute flows & bubbles (async helper) and draw
+    try {
+      await computeFlows(yearMin, yearMax);
+      drawFlowArcs();
+      drawBubbles();
+      updateBubbleLegend();
+    } catch (e) { console.warn('flow/bubble computation failed', e); }
     console.info("[CHORO] countries:", agg.size, "max matches:", maxMatches);
   }
 
   function applyChoropleth(){
-    if (!choroActive) return;
+    if (!choroActive) { console.info('[CHORO] applyChoropleth called but choroActive=false'); return; }
     gCountries.selectAll("path.country")
       .style("fill", d => {
           const key = canonicalMapName(d.properties?.name || "");
           const rec = choroByCountry.get(key);
+          // diagnostic: log when a country has no rec
+          if (!rec) {
+            // nothing
+          }
           if (!rec) return null;
           const fmtRec = (selectedFormat === 'all') ? rec : (rec.formats[selectedFormat] && rec.formats[selectedFormat].matches ? rec.formats[selectedFormat] : null);
           const pct = fmtRec ? (fmtRec.winPct ?? 0) : rec.winPct;
@@ -620,7 +650,6 @@
     const sel = gSpikes.selectAll("line.spike").data(data, d => d.key);
     sel.exit().remove();
     // use a high-contrast dark-red stroke for spikes and make them thicker
-    const SPIKE_COLOR = '#8b0000';
     sel.enter().append("line").attr("class","spike")
   .merge(sel)
   .attr("stroke", SPIKE_COLOR)
@@ -652,31 +681,471 @@
   }
 
   function renderSpikeLegend(maxMatches){
+    // draw into the dedicated spike legend svg (if present)
     if (!spikeLegend) return;
     const svgL = d3.select(spikeLegend);
-    svgL.selectAll("*").remove();
-    const w = +svgL.attr("width"), h = +svgL.attr("height");
-    const cx = 24, baseY = h - 8;
-    // Use the same spikeScale so legend matches rendered spike heights.
-    // Ensure we copy the current domain/range for local computations.
-    const localScale = spikeScale.copy ? spikeScale.copy() : d3.scaleLinear().domain([0, maxMatches]).range([0, 34]);
-    // If the global spikeScale range is larger (globe mode), reflect that in legend height
-    // but keep it visually constrained to the legend box.
-    const maxPx = Math.min(56, (localScale(maxMatches) || 34));
-    localScale.range([0, maxPx]).domain([0, maxMatches]);
-    const ticks = (localScale.ticks && typeof localScale.ticks === 'function') ? localScale.ticks(3) : d3.scaleLinear().domain([0, maxMatches]).ticks(3);
-  const SPIKE_COLOR = '#8b0000'; // dark red for legend lines/text
-    // main spike line
-    svgL.append("line").attr("x1", cx).attr("y1", baseY).attr("x2", cx).attr("y2", baseY - localScale(maxMatches))
-      .attr("stroke", SPIKE_COLOR).attr("stroke-width", 2).attr("opacity", 0.95);
-    // ticks + labels
+    svgL.selectAll('*').remove();
+    const w = +svgL.attr('width') || 160, h = +svgL.attr('height') || 72;
+    // accessible label for screen readers
+    try { svgL.attr('role', 'img').attr('aria-label', `Spike legend — height = matches hosted`); } catch(e){}
+
+    // Prepare ticks (small, mid, max) and layout
+    const ticks = [Math.max(1, Math.round(maxMatches/4)), Math.max(1, Math.round(maxMatches/2)), Math.max(1, Math.round(maxMatches))];
+  const padding = 10;
+  // place the vertical spike at the far right edge with a small margin
+  const baseX = Math.max(w - padding - 6, w * 0.6);
+    const baseY = Math.round(h/2) + 8;
+
+    // Draw the tallest spike as the sample baseline
+    const maxH = spikeScale(maxMatches);
+    svgL.append('line')
+      .attr('x1', baseX)
+      .attr('y1', baseY)
+      .attr('x2', baseX)
+      .attr('y2', baseY - maxH)
+      .attr('stroke', SPIKE_COLOR)
+      .attr('stroke-width', 3)
+      .attr('stroke-linecap', 'round')
+      .attr('opacity', 0.95);
+
+    // draw tick marks and labels for the sample values
     ticks.forEach(t => {
-      const y = baseY - localScale(t);
-      svgL.append("line").attr("x1", cx-6).attr("y1", y).attr("x2", cx+6).attr("y2", y).attr("stroke", SPIKE_COLOR).attr("opacity",0.8);
-      svgL.append("text").attr("x", cx+12).attr("y", y+4).attr("fill",SPIKE_COLOR).attr("font-size", 11).text(t);
+      const y = baseY - spikeScale(t);
+      svgL.append('line')
+        .attr('x1', baseX - 8)
+        .attr('y1', y)
+        .attr('x2', baseX + 8)
+        .attr('y2', y)
+        .attr('stroke', SPIKE_COLOR)
+        .attr('opacity', 0.9);
+      svgL.append('text')
+        .attr('x', baseX - 12)
+        .attr('y', y + 4)
+        .attr('fill', 'var(--muted)')
+        .attr('font-size', 11)
+        .attr('text-anchor', 'end')
+        .text(String(t));
     });
-    // explanatory label (smaller) to clarify the metric
-    svgL.append('text').attr('x', 6).attr('y', 12).attr('fill', SPIKE_COLOR).attr('font-size', 11).text('Spike height = matches hosted');
+
+    // Left-side explanatory text + color swatch for the spike
+    const titleGroupX = padding;
+    svgL.append('rect')
+      .attr('x', titleGroupX)
+      .attr('y', 6)
+      .attr('width', 10)
+      .attr('height', 10)
+      .attr('rx', 2)
+      .attr('fill', SPIKE_COLOR)
+      .attr('stroke', 'rgba(0,0,0,0.12)');
+
+    svgL.append('text')
+      .attr('x', titleGroupX + 16)
+      .attr('y', 16)
+      .attr('fill', 'var(--muted)')
+      .attr('font-size', 12)
+      .attr('font-weight', 600)
+      .text('Match spikes');
+
+    svgL.append('text')
+      .attr('x', titleGroupX)
+      .attr('y', 34)
+      .attr('fill', 'var(--muted)')
+      .attr('font-size', 11)
+      .text('Height = matches hosted');
+  }
+
+  function renderBubbleLegend(maxMatches){
+    if (!bubbleLegend) return;
+    const svgL = d3.select(bubbleLegend);
+    svgL.selectAll('*').remove();
+    const w = +svgL.attr('width') || 160, h = +svgL.attr('height') || 56;
+    // accessibility
+    try { svgL.attr('role','img').attr('aria-label', `Bubble size legend — ${bubbleMetric}`); } catch(e){}
+
+    const ticks = [Math.max(1, Math.round(maxMatches/4)), Math.max(1, Math.round(maxMatches/2)), Math.max(1, Math.round(maxMatches))];
+    // compute radii and layout
+    const radii = ticks.map(t => bubbleRadiusScale(t));
+    const maxR = Math.max(...radii, 6);
+    const padding = 8;
+    const startX = padding + maxR;
+    const usableW = Math.max(48, w - padding * 2 - maxR * 2);
+    const spacing = ticks.length > 1 ? (usableW / (ticks.length - 1)) : 0;
+    const cy = h / 2;
+
+    // explanatory label (top-left)
+    const metricLabel = (bubbleMetric === 'matches') ? 'matches hosted' : bubbleMetric;
+    svgL.append('text')
+      .attr('x', padding)
+      .attr('y', 12)
+      .attr('fill', 'var(--muted)')
+      .attr('font-size', 11)
+      .attr('font-weight', 500)
+      .text('Bubble size = ' + metricLabel);
+
+    // draw sample circles and numeric labels
+    ticks.forEach((t, i) => {
+      const r = radii[i];
+      const x = startX + i * spacing;
+      svgL.append('circle')
+        .attr('cx', x)
+        .attr('cy', cy)
+        .attr('r', r)
+        .attr('fill', '#e76f51')
+        .attr('fill-opacity', 0.85)
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 0.6);
+
+      svgL.append('text')
+        .attr('x', x)
+        .attr('y', cy + r + 12)
+        .attr('fill', 'var(--muted)')
+        .attr('font-size', 11)
+        .attr('text-anchor', 'middle')
+        .text(t);
+    });
+  }
+
+  function updateBubbleLegend(){
+    const maxMatches = d3.max((bubbleData||[]).concat(flowData||[]), d => d.matches) || 1;
+    renderBubbleLegend(maxMatches);
+  }
+
+  /* -------------------------- Flows & Bubbles --------------------------- */
+  // computeFlows: read lightweight CSV (matches) and aggregate origin->host counts
+  async function computeFlows(yearMin, yearMax){
+    try{
+      let rows = [];
+      // Prefer loading the lightweight CSV, but handle network failures gracefully.
+        try {
+        // Fetch the matches CSV from the repository's raw GitHub URL (avoid local file CORS issues)
+        const resp = await fetch("https://raw.githubusercontent.com/DushyantPathania/DVP-p2/main/data/csvs/matches.csv");
+        if (resp && resp.ok) {
+          const txt = await resp.text();
+          rows = d3.csvParse(txt);
+        } else {
+          throw new Error(`CSV fetch failed: ${resp ? resp.status : 'no response'}`);
+        }
+      } catch (fetchErr) {
+        console.warn('computeFlows: CSV load failed, attempting DB fallback', fetchErr);
+        // Fallback: try to read matches-like tables from the DB (if available)
+        try {
+          const tables = await loadMatchTables();
+          if (tables && tables.length) {
+            const unionParts = tables.map(t => {
+              const m = t.map;
+              const neutralExpr = m.neutralCol ? `COALESCE(${m.neutralCol},0)` : "0";
+              const resultExpr  = m.resultCol  ? `COALESCE(${m.resultCol},'')`  : "''";
+              const formatExpr  = m.formatCol ? `COALESCE(${m.formatCol},'')` : "''";
+              return `
+                SELECT
+                  ${m.winnerCol} AS winner,
+                  ${m.hostCol}   AS venue_country,
+                  ${m.dateCol}   AS date,
+                  ${neutralExpr} AS neutral_venue,
+                  ${resultExpr}  AS result_type,
+                  ${formatExpr}  AS format,
+                  NULL AS team1, NULL AS team2
+                FROM ${t.name}
+              `;
+            });
+            const unionSQL = unionParts.join(' UNION ALL ');
+            // Query DB with year filter to avoid transferring large amounts of rows
+            rows = DB.queryAll(`SELECT * FROM (${unionSQL}) WHERE ${yClause()}`, [yearMin, yearMax]) || [];
+          } else {
+            console.warn('computeFlows: No matches-like tables found in DB to fallback to');
+            rows = [];
+          }
+        } catch (dbErr) {
+          console.warn('computeFlows: DB fallback failed', dbErr);
+          rows = [];
+        }
+      }
+      const pairs = new Map(); // key origin|host -> count
+      const hostTotals = new Map(); // host -> count
+      for (const r of rows){
+        const y = +(String(r.date||"").slice(0,4));
+        if (!y || y < yearMin || y > yearMax) continue;
+        const neutral = String(r.neutral_venue||r.neutral||"0").trim() === '1';
+        if (neutral) continue;
+        const rt = String(r.result_type||r.result||"").toLowerCase();
+        if (rt.includes('no result') || rt.includes('no_result') || rt.includes('tie') || rt.includes('tied')) continue;
+        const hostRaw = r.venue_country || r.host || r.venuecountry || r.venue_country;
+        if (!hostRaw) continue;
+        const hostKey = canonicalMapName(hostRaw);
+        // guess home team and visitor from team1/team2 fields
+        const t1 = canonicalTeamName(r.team1 || r.team_a || r.team_a || "");
+        const t2 = canonicalTeamName(r.team2 || r.team_b || r.team_b || "");
+        const homeTeam = canonicalTeamName(hostToHomeTeamCountry(hostKey));
+        let visitor = null;
+        if (t1 && t2){
+          if (t1 === homeTeam) visitor = t2;
+          else if (t2 === homeTeam) visitor = t1;
+          else visitor = t1; // fallback
+        } else {
+          visitor = (t1 || t2 || '').toLowerCase();
+        }
+        if (!visitor) continue;
+        const originKey = canonicalMapName(visitor);
+        const key = `${originKey}|${hostKey}`;
+        pairs.set(key, (pairs.get(key)||0) + 1);
+        hostTotals.set(hostKey, (hostTotals.get(hostKey)||0) + 1);
+      }
+
+      // build flowData array with coordinates
+      const outFlows = [];
+      pairs.forEach((cnt, k) => {
+        const [originKey, hostKey] = k.split('|');
+        const originFeat = countries.find(f => canonicalMapName(f.properties?.name||'') === originKey);
+        const hostFeat   = countries.find(f => canonicalMapName(f.properties?.name||'') === hostKey);
+        if (!originFeat || !hostFeat) return;
+        const o = d3.geoCentroid(originFeat), h = d3.geoCentroid(hostFeat);
+        if (!o || !h || !isFinite(o[0]) || !isFinite(o[1]) || !isFinite(h[0]) || !isFinite(h[1])) return;
+        outFlows.push({ originKey, hostKey, originLon: o[0], originLat: o[1], hostLon: h[0], hostLat: h[1], matches: cnt });
+      });
+
+      flowData = outFlows;
+      // bubble data derived from hostTotals
+      const bOut = [];
+      hostTotals.forEach((cnt, hostKey) => {
+        const feat = countries.find(f => canonicalMapName(f.properties?.name||'') === hostKey);
+        if (!feat) return;
+        const c = d3.geoCentroid(feat);
+        if (!c || !isFinite(c[0]) || !isFinite(c[1])) return;
+        bOut.push({ key: hostKey, lon: c[0], lat: c[1], matches: cnt });
+      });
+      bubbleData = bOut;
+
+      // scales (shared max)
+      const maxMatches = d3.max(flowData.concat(bubbleData), d => d.matches) || 1;
+      flowWidthScale = d3.scaleSqrt().domain([0, maxMatches]).range([0.6, 6]);
+      bubbleRadiusScale = d3.scaleSqrt().domain([0, maxMatches]).range([2, 18]);
+
+          // compute per-origin color mapping and populate flow filter UI
+          try {
+            const origins = Array.from(new Set(flowData.map(d => d.originKey))).sort();
+            // assign distinct colors using an interpolator to avoid repeating the same color
+            countryColors = new Map();
+            origins.forEach((k,i) => {
+              // use a rainbow interpolation for broad distinct hues
+              const col = d3.interpolateRainbow(i / Math.max(1, origins.length));
+              countryColors.set(k, col);
+            });
+              // If the flow country UI exists, populate it
+              if (document && document.getElementById) {
+                try { renderFlowFilterUI(); } catch(e) { /* ignore UI population errors */ }
+              }
+              // Diagnostic: log how many origin colors were assigned and show a small sample
+              try {
+                console.info('[FLOWS] countryColors assigned:', countryColors.size);
+                const sample = Array.from(countryColors.entries()).slice(0,8).map(([k,v]) => ({origin:k,color:v}));
+                console.info('[FLOWS] countryColors sample:', sample);
+              } catch(e) { /* ignore diag failures */ }
+          } catch(e) { console.warn('flow color mapping failed', e); }
+    }catch(e){ console.warn('computeFlows failed', e); flowData = []; bubbleData = []; }
+  }
+
+  // small drawing helpers
+  let flowWidthScale = d3.scaleSqrt().domain([0,1]).range([0.6,6]);
+  let bubbleRadiusScale = d3.scaleSqrt().domain([0,1]).range([2,18]);
+
+  function drawFlowArcs(){
+    // flows are a globe-only visual
+    if (!flowVisible) { gFlowArcs.selectAll('path.flow').remove(); console.info('[FLOWS] flowVisible=false, removed arcs'); return; }
+    // Apply country filter: if selectedFlowCountries is empty -> show all origins; otherwise filter
+    const data = flowData.filter(d => {
+      // selectedFlowCountries: null => all, Set(size=0) => none, Set(size>0) => those
+      if (selectedFlowCountries === null) return true;
+      if (selectedFlowCountries instanceof Set && selectedFlowCountries.size === 0) return false;
+      return selectedFlowCountries.has(d.originKey);
+    });
+    const sel = gFlowArcs.selectAll('path.flow').data(data, d => d.originKey+"|"+d.hostKey);
+    sel.exit().remove();
+    const enter = sel.enter().append('path').attr('class','flow').attr('fill','none').attr('stroke-linecap','round').attr('opacity',0.95);
+    // add basic interactivity: tooltip on hover, click to focus target country
+    enter.on('pointerenter', (ev,d) => {
+      try {
+        // stop globe spin while hovering over arc for readability
+        if (mode === 'globe') stopSpin();
+        const html = `<div style="font-weight:600">${escapeHtml(d.originKey)} → ${escapeHtml(d.hostKey)}</div><div style="font-size:0.9rem;color:#dfe6ea">Matches: <strong>${d.matches}</strong></div>`;
+        showTooltipAt(ev.clientX, ev.clientY, html);
+      } catch(e){}
+    })
+    .on('pointermove', (ev) => { try { moveTooltipToEvent(ev); } catch(e){} })
+    .on('pointerleave', () => {
+      try { hideTooltip(); } catch(e){}
+      try {
+        // resume spin if appropriate when pointer leaves the arc
+        if (mode === 'globe' && !isDragging && !countryFocused) startSpin();
+      } catch(e){}
+    })
+    .on('click', (ev,d) => {
+      try { ev.stopPropagation(); const found = countries.find(f => canonicalMapName(f.properties?.name||'') === d.hostKey); if (found) { handleCountryClick(found); } } catch(e){}
+    });
+    enter.merge(sel).each(function(d){
+      // build GeoJSON LineString sampling geodesic points
+      try{
+        // adapt interpolation steps by great-circle distance to reduce path complexity for long arcs
+        const dist = d3.geoDistance([d.originLon, d.originLat], [d.hostLon, d.hostLat]);
+        const N = Math.max(12, Math.min(80, Math.round(40 * Math.min(1, dist / Math.PI))));
+        const interp = d3.geoInterpolate([d.originLon, d.originLat], [d.hostLon, d.hostLat]);
+        const coords = [];
+        for (let i=0;i<=N;i++){ coords.push(interp(i/N)); }
+        const geo = { type: 'LineString', coordinates: coords };
+        d3.select(this).attr('d', path(geo)).attr('stroke-width', Math.max(0.6, flowWidthScale(d.matches)));
+  // color by origin
+  const col = countryColors.get(d.originKey) || countryColorScale(d.originKey);
+  d3.select(this).attr('stroke', col);
+      }catch(e){ d3.select(this).attr('d', null); }
+    });
+    console.info('[FLOWS] drawFlowArcs created', data.length || 0, 'arcs');
+    // Diagnostic: after creating arcs, inspect the first few DOM nodes to see actual stroke attr
+    try {
+      const nodes = Array.from(gFlowArcs.node().querySelectorAll('path.flow')).slice(0,6);
+      const attrs = nodes.map(n => ({d: n.getAttribute('d') ? 'yes' : 'no', strokeAttr: n.getAttribute('stroke'), strokeStyle: window.getComputedStyle(n).stroke}));
+      console.info('[FLOWS] arc DOM sample attrs:', attrs);
+    } catch(e) { /* ignore */ }
+    updateFlowPositions();
+  }
+
+  function updateFlowPositions(){
+    // respect flow visibility: if flows are turned off, keep them hidden
+    if (!flowVisible) { try { gFlowArcs.selectAll('path.flow').style('display','none'); } catch(e){}; return; }
+    // hide flows in map mode
+    if (mode === 'map') { gFlowArcs.selectAll('path.flow').style('display','none'); return; }
+    gFlowArcs.selectAll('path.flow').each(function(d){
+      try{
+        // cull if not on visible hemisphere
+        const r = projection.rotate();
+        const visibleOrigin = d3.geoDistance([d.originLon,d.originLat], [-r[0], -r[1]]) <= Math.PI/2;
+        const visibleHost   = d3.geoDistance([d.hostLon,d.hostLat],   [-r[0], -r[1]]) <= Math.PI/2;
+        const visible = visibleOrigin || visibleHost;
+  d3.select(this).style('display', visible ? 'block' : 'none');
+        // recompute geometry for current projection/zoom
+        const interp = d3.geoInterpolate([d.originLon, d.originLat], [d.hostLon, d.hostLat]);
+        const N = 45; const coords = [];
+        for (let i=0;i<=N;i++) coords.push(interp(i/N));
+        const geo = { type: 'LineString', coordinates: coords };
+        d3.select(this).attr('d', path(geo)).attr('stroke-width', Math.max(0.6, flowWidthScale(d.matches)) * (mode==='globe' ? globeZoomK : 1));
+  // ensure color stays in sync (in case selection or colors changed)
+  const col = countryColors.get(d.originKey) || countryColorScale(d.originKey);
+  d3.select(this).attr('stroke', col);
+      }catch(e){ d3.select(this).attr('d', null); }
+    });
+  }
+
+  function drawBubbles(){
+    const sel = gBubbles.selectAll('circle.bubble').data(bubbleData, d => d.key);
+    sel.exit().remove();
+    const enter = sel.enter().append('circle').attr('class','bubble').attr('fill','#e76f51').attr('fill-opacity',0.75).attr('stroke','#fff').attr('stroke-width',0.6);
+    // interactivity: tooltip on hover and click to focus
+    enter.on('pointerenter', (ev,d) => { try { const html = `<div style="font-weight:600">${escapeHtml(d.key)}</div><div style="font-size:0.9rem;color:#dfe6ea">Matches hosted: <strong>${d.matches}</strong></div>`; showTooltipAt(ev.clientX, ev.clientY, html); } catch(e){} })
+         .on('pointermove', (ev) => { try { moveTooltipToEvent(ev); } catch(e){} })
+         .on('pointerleave', () => { try { hideTooltip(); } catch(e){} })
+         .on('click', (ev,d) => { try{ ev.stopPropagation(); const found = countries.find(f => canonicalMapName(f.properties?.name||'') === d.key); if (found) { handleCountryClick(found); } } catch(e){} });
+
+    enter.merge(sel).attr('r', d => Math.max(1, bubbleRadiusScale(d.matches))).each(function(d){
+      const p = projection([d.lon,d.lat]);
+      if (p) d3.select(this).attr('cx', p[0]).attr('cy', p[1]);
+    });
+    console.info('[BUBBLES] drawBubbles created', bubbleData.length || 0, 'bubbles');
+    updateBubblePositions();
+  }
+
+  function updateBubblePositions(){
+    if (mode === 'globe') { gBubbles.selectAll('circle.bubble').style('display','none'); return; }
+    gBubbles.selectAll('circle.bubble').each(function(d){
+      try{
+        const p = projection([d.lon,d.lat]);
+        if (!p) return; d3.select(this).style('display','block').attr('cx', p[0]).attr('cy', p[1]).attr('r', Math.max(1, bubbleRadiusScale(d.matches)));
+      }catch(e){ /* ignore */ }
+    });
+  }
+
+  // Render the flow filter UI (populate the custom dropdown list with colored options)
+  function renderFlowFilterUI(){
+    const container = document.getElementById('flowCountryItems');
+    const btn = document.getElementById('flowCountryBtn');
+    const selectAll = document.getElementById('flowSelectAll');
+    if (!container || !btn) return;
+    const origins = Array.from(new Set(flowData.map(d => d.originKey))).sort();
+  container.innerHTML = '';
+  // header controls already rendered above; we'll add a 'None' quick-toggle below the Select All
+  // populate items
+  origins.forEach(k => {
+      const row = document.createElement('div'); row.style.display = 'flex'; row.style.alignItems = 'center'; row.style.gap = '8px'; row.style.padding = '4px 2px'; row.style.cursor = 'pointer';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = k; cb.checked = true; cb.style.margin = '0 6px 0 0';
+      const sw = document.createElement('span'); sw.style.width='14px'; sw.style.height='14px'; sw.style.display='inline-block'; sw.style.borderRadius='2px'; sw.style.background = countryColors.get(k) || countryColorScale(k);
+      const lbl = document.createElement('span'); lbl.textContent = k; lbl.style.color = '#e8e8e8'; lbl.style.fontSize = '0.88rem'; lbl.style.marginLeft = '6px';
+      row.appendChild(cb); row.appendChild(sw); row.appendChild(lbl);
+      // clicking row toggles checkbox
+      row.addEventListener('click', (ev) => {
+        if (ev.target && ev.target.tagName === 'INPUT') return; // native checkbox click handled
+        cb.checked = !cb.checked;
+        updateFlowSelectionFromUI();
+      });
+      cb.addEventListener('change', () => updateFlowSelectionFromUI());
+      container.appendChild(row);
+    });
+    // wire the 'None' toggle
+    const selectNone = document.getElementById('flowSelectNone');
+    if (selectNone) {
+      selectNone.addEventListener('change', () => {
+        const container = document.getElementById('flowCountryItems');
+        if (!container) return;
+        const checks = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+        if (selectNone.checked) {
+          // uncheck all
+          checks.forEach(c => c.checked = false);
+          const selectAll = document.getElementById('flowSelectAll'); if (selectAll) selectAll.checked = false;
+          selectedFlowCountries = new Set(); // none
+        } else {
+          // default back to all
+          checks.forEach(c => c.checked = true);
+          const selectAll = document.getElementById('flowSelectAll'); if (selectAll) selectAll.checked = true;
+          selectedFlowCountries = null;
+        }
+        updateFlowDropdownButton(); drawFlowArcs();
+      });
+    }
+    // reset selection state (null === all selected)
+    selectAll.checked = true;
+  const selNoneNode = document.getElementById('flowSelectNone'); if (selNoneNode) selNoneNode.checked = false;
+    selectedFlowCountries = null; // null => all
+    updateFlowDropdownButton();
+  }
+
+  function updateFlowSelectionFromUI(){
+    const container = document.getElementById('flowCountryItems');
+    const selectAll = document.getElementById('flowSelectAll');
+    if (!container) return;
+    const checks = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+    const checked = checks.filter(c => c.checked).map(c => c.value);
+    if (checked.length === checks.length) {
+      // all selected -> treat as 'all' (null)
+      selectedFlowCountries = null;
+      if (selectAll) selectAll.checked = true;
+    } else if (checked.length === 0) {
+      // none selected -> explicit none (empty set)
+      selectedFlowCountries = new Set();
+      if (selectAll) selectAll.checked = false;
+    } else {
+      selectedFlowCountries = new Set(checked);
+      if (selectAll) selectAll.checked = false;
+    }
+    updateFlowDropdownButton();
+    drawFlowArcs();
+  }
+
+  function updateFlowDropdownButton(){
+    const btn = document.getElementById('flowCountryBtn');
+    const container = document.getElementById('flowCountryItems');
+    if (!btn || !container) return;
+    const total = container.querySelectorAll('input[type="checkbox"]').length;
+    let label = 'All countries';
+    if (selectedFlowCountries === null) label = 'All countries';
+    else if (selectedFlowCountries.size === 0) label = 'Filter origins: None';
+    else label = `Filter origins: ${selectedFlowCountries.size} selected`;
+    btn.textContent = label;
   }
 
   /* ------------------------- Focus helpers (globe / map) ------------------ */
@@ -756,11 +1225,42 @@
 
     // Section: spike legend (svg)
   const sec2 = legend.append('div').attr('class','legend-section spike-section');
-  sec2.append('div').attr('class','legend-title').text('Win spikes = matches hosted');
+  sec2.append('div').attr('class','legend-title').text('Match spikes (height = matches hosted)');
     // attach an svg for spike legend
-  const svgEl = sec2.append('svg').attr('width', 160).attr('height', 72);
+  // make spike legend a bit wider so the vertical sample can sit at the far right without overlapping text
+  const svgEl = sec2.append('svg').attr('width', 220).attr('height', 72);
   spikeLegend = svgEl.node();
   spikeLegendSection = sec2.node();
+
+  // Section: flows & bubbles controls
+  const sec3 = legend.append('div').attr('class','legend-section flow-section');
+  sec3.append('div').attr('class','legend-title').text('Flows & bubbles');
+  // Flow controls: visibility toggle + origin-country multi-select (colored)
+  const flowControls = sec3.append('div').attr('class','flow-controls').style('display','flex').style('flex-direction','column').style('gap','8px');
+  const flowToggle = flowControls.append('label').attr('class','flow-toggle').style('display','flex').style('align-items','center').style('gap','8px');
+  flowToggle.append('input').attr('type','checkbox').attr('id','flowVisibleToggle').property('checked', false);
+  flowToggle.append('span').text('Show flow arcs (globe only)').style('font-size','0.92rem').style('color','#e8e8e8');
+
+  // Country multi-select dropdown (custom) with color swatches _inside_ options
+      flowControls.append('div').attr('class','flow-select-wrap').html(`
+    <div id="flowCountryDropdown" class="flow-dropdown" style="position:relative;">
+      <button id="flowCountryBtn" style="min-width:180px;padding:6px 8px;border-radius:6px;background:#1a1a1a;color:#e8e8e8;border:1px solid #333;text-align:left;">Filter origins: All countries</button>
+      <div id="flowCountryList" style="position:absolute;left:0;top:36px;z-index:2200;background:#0f1315;border:1px solid #222;padding:8px;display:none;max-height:260px;overflow:auto;width:320px;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,0.6);">
+        <div style="margin-bottom:8px;color:#d0d8dc;font-size:0.85rem;display:flex;gap:12px;align-items:center;">
+          <label style="cursor:pointer;display:flex;align-items:center;gap:6px"><input type="checkbox" id="flowSelectAll" checked style="margin-right:4px"> Select All</label>
+          <label style="cursor:pointer;display:flex;align-items:center;gap:6px"><input type="checkbox" id="flowSelectNone" style="margin-right:4px"> None</label>
+        </div>
+        <div id="flowCountryItems"></div>
+      </div>
+    </div>
+  `);
+
+  // (no rivalry legend — flows controlled by the dropdown)
+  // bubble metric selector (persisted)
+  sec3.append('div').attr('class','bubble-metric').html(`Metric: <select id="bubbleMetricSelect"><option value="matches">Matches hosted</option></select>`);
+  // bubble legend svg (map-only)
+  const bsvg = sec3.append('svg').attr('class','bubble-legend').attr('width',160).attr('height',56).style('display','block');
+  bubbleLegend = bsvg.node(); bubbleLegendSection = bsvg.node();
 
     // Position the legend: top-right, below toggle
     // CSS `.legend` rules provide baseline styling; adjust position relative to toggle
@@ -798,6 +1298,9 @@
     updateHoverTransform();
     updateVenuesPosition();
     updateSpikesPosition();
+    // Ensure flows and bubbles update positions when projection/mode changes
+    try { updateFlowPositions(); } catch(e) { /* non-fatal */ }
+    try { updateBubblePositions(); } catch(e) { /* non-fatal */ }
   }
   function updateHoverTransform(){
     gCountries.selectAll("path.country").each(function (d) {
@@ -907,6 +1410,12 @@
     const maxMatches = d3.max(Array.from(choroByCountry.values()||[]), d => d.matches) || 1;
   spikeScale.range([0, mode==="globe" ? 56 : 40]);
     updateSpikesPosition();
+    // show bubble legend and bubble controls only in 2D map mode; show flow controls only in globe mode
+    try {
+      if (bubbleLegendSection) bubbleLegendSection.style.display = (mode === 'map' ? 'block' : 'none');
+      const flowCtrl = document.querySelector('.flow-controls'); if (flowCtrl) flowCtrl.style.display = (mode === 'globe' ? 'flex' : 'none');
+      const bubbleMetricEl = document.querySelector('.bubble-metric'); if (bubbleMetricEl) bubbleMetricEl.style.display = (mode === 'map' ? 'block' : 'none');
+    } catch(e) {}
   }
 
   /* ------------------------------- Resize ---------------------------------- */
@@ -1284,6 +1793,7 @@
     const { min, max } = ev.detail || {};
     console.info("[SLIDER] range:", min, max);
     await computeChoropleth(min, max);
+    try { await computeFlows(min, max); drawFlowArcs(); drawBubbles(); } catch(e){ /* ignore */ }
     // If the leaderboard overlay is open, refresh it so it respects the new year range
     try {
       if (overlay && !overlay.hidden) {
@@ -1296,8 +1806,68 @@
 
   // initial choropleth + spikes
   await computeChoropleth(yearRange.min, yearRange.max);
+  // ensure flows/bubbles are computed initially
+  try { await computeFlows(yearRange.min, yearRange.max); drawFlowArcs(); drawBubbles(); updateBubbleLegend(); } catch(e) {}
   // wire up the format selector once initial data is available
   setupFormatUI();
+
+  // bubble metric selector wiring (persist selection)
+  try {
+    const bsel = document.getElementById('bubbleMetricSelect');
+    if (bsel) {
+      try{ bsel.value = bubbleMetric; } catch(e){}
+      bsel.addEventListener('change', (ev) => {
+        bubbleMetric = ev.target.value || 'matches';
+        try{ localStorage.setItem('bubbleMetric', bubbleMetric); } catch(e){}
+        try{ updateBubbleLegend(); } catch(e){}
+      });
+    }
+  } catch(e) { /* non-fatal */ }
+
+  // Flow visibility + country filter wiring
+  try {
+    const fToggle = document.getElementById('flowVisibleToggle');
+    const fSelect = document.getElementById('flowCountrySelect');
+    const fLegend = document.getElementById('flowColorLegend');
+    const fDropdownBtn = document.getElementById('flowCountryBtn');
+    const fDropdown = document.getElementById('flowCountryDropdown');
+    const fCountryList = document.getElementById('flowCountryList');
+    const fSelectAll = document.getElementById('flowSelectAll');
+    if (fToggle) {
+      fToggle.checked = !!flowVisible;
+      fToggle.addEventListener('change', (ev) => {
+        flowVisible = !!ev.target.checked;
+        try { if (!flowVisible) { gFlowArcs.selectAll('path.flow').style('display','none'); } else { gFlowArcs.selectAll('path.flow').style('display','block'); drawFlowArcs(); } } catch(e){}
+      });
+    }
+    // wire dropdown open/close
+    try {
+      if (fDropdownBtn && fCountryList) {
+        fDropdownBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const show = fCountryList.style.display !== 'block';
+          document.querySelectorAll('#flowCountryList').forEach(n => n.style.display = 'none');
+          fCountryList.style.display = show ? 'block' : 'none';
+        });
+        // click outside closes
+        document.addEventListener('click', () => { try { fCountryList.style.display = 'none'; } catch(e){} });
+      }
+    } catch(e){}
+    // wire select-all
+    if (fSelectAll) {
+      fSelectAll.addEventListener('change', () => {
+        const container = document.getElementById('flowCountryItems');
+        if (!container) return;
+        const checks = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+        checks.forEach(c => c.checked = !!fSelectAll.checked);
+        updateFlowSelectionFromUI();
+      });
+    }
+    // initial population if flows already exist
+    try { renderFlowFilterUI(); } catch(e){}
+    // hide flow controls in map mode
+    try { const fc = document.querySelector('.flow-controls'); if (fc) fc.style.display = (mode === 'globe' ? 'flex' : 'none'); } catch(e){}
+  } catch(e) { /* non-fatal */ }
 
   /* ------------------------- Utilities: slider ------------------------------ */
   function clamp(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }

@@ -124,23 +124,6 @@
   radarWrap.style.position = 'relative';
   radarWrap.innerHTML = `<svg width="420" height="220" data-role="radar"></svg>`;
 
-  const loadingOverlay = document.createElement('div');
-  loadingOverlay.className = 'venue-loading';
-  loadingOverlay.style.position = 'absolute';
-  loadingOverlay.style.left = '0';
-  loadingOverlay.style.top = '0';
-  loadingOverlay.style.right = '0';
-  loadingOverlay.style.bottom = '0';
-  loadingOverlay.style.display = 'none';
-  loadingOverlay.style.alignItems = 'center';
-  loadingOverlay.style.justifyContent = 'center';
-  loadingOverlay.style.background = 'rgba(0,0,0,0.28)';
-  loadingOverlay.style.color = 'white';
-  loadingOverlay.style.fontSize = '0.95rem';
-  loadingOverlay.style.borderRadius = '6px';
-  loadingOverlay.textContent = 'Loading venue details...';
-  radarWrap.appendChild(loadingOverlay);
-
   const legend = document.createElement("div");
   legend.className = "venue-card venue-legend";
     // make legend sit to the right, allow it to grow
@@ -523,232 +506,96 @@
     const exactParams = aliases.slice();
   const likeClause = aliases.length ? aliases.map(_ => `LOWER(COALESCE(m.venue_name, '')) LIKE ?`).join(' OR ') : `LOWER(COALESCE(m.venue_name, '')) LIKE ?`;
     const likeParams = aliases.length ? aliases.map(p => `%${p}%`) : [`%${(datum.venue||datum.name||'').toLowerCase()}%`];
-    // try to offload aggregation to worker first (faster UI, avoids main-thread jank)
+    // New simplified aggregation: query the `venue_stats` table directly and
+    // compute per-format aggregates. This replaces the previous multi-table
+    // SQL and worker-based approach.
     try {
-      ensureWorker();
-      if (_venueWorker) {
-        const wres = await workerAggregate({ aliases, yrRange, format });
-        if (wres && wres.byFormat) {
-          const byFormat = wres.byFormat;
-          svgEl._metrics = { byFormat }; svgEl.dataset.metrics = JSON.stringify({ byFormat });
-          // populate hidden developer diagnostics panel (toggle with Shift+click on title)
-          try {
-            const diag = panel.querySelector('.venue-diag');
-            if (diag) diag.textContent = JSON.stringify(svgEl._metrics, null, 2);
-          } catch (e) { /* ignore */ }
-          try { _metricsCache.set(JSON.stringify({ id: datum.venue || datum.name || datum.venue_id || '', yr: yrRange, format }), svgEl._metrics); } catch(e) {}
-          drawRadar(svgEl);
-          // hide loading overlay
-          if (loadingOverlay) loadingOverlay.style.display = 'none';
-          // textual summary
-          const heat = panel.querySelector('.venue-heat');
-          if (heat) {
-            const totalMatches = Object.values(byFormat).reduce((s, m) => s + (m && m.matches_count ? m.matches_count : 0), 0);
-            heat.innerHTML = `<div style="font-size:.95rem;color:var(--text)"><div style="margin-bottom:6px"><strong>Total matches (selected years):</strong> ${totalMatches}</div></div>`;
-            const list = document.createElement('div'); list.style.display = 'grid'; list.style.gap = '6px'; list.style.marginTop = '6px';
-            const formatOrder = ['test','odi','t20i'];
-            const colors = { test: '#e6cf9a', odi: '#2dd4bf', t20i: '#a78bfa' };
-            formatOrder.forEach(k => {
-              const m = byFormat[k];
-              const row = document.createElement('div');
-              row.style.display = 'flex'; row.style.justifyContent = 'space-between'; row.style.alignItems = 'center'; row.style.gap = '10px';
-              row.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;background:${colors[k]}"></span><strong style="width:48px;text-transform:uppercase;color:var(--muted)">${k}</strong><span style="color:var(--muted)">Matches:</span></div><div style="text-align:right;color:var(--text)">${m && m.matches_count ? m.matches_count : '—'}</div>`;
-              list.appendChild(row);
-            });
-            heat.appendChild(list);
-          }
-          return;
-        }
-      }
-    } catch (we) {
-      // worker failed — fallback to local aggregation
-      console.warn('venue worker aggregation failed, falling back to main thread:', we && we.message ? we.message : we);
-    }
-    // we'll try exact first, then LIKE fallback
-    let usedMatchStrategy = 'none';
+      // Build SQL WHERE clause for venue name aliases using LIKE
+      const whereParts = [];
+      const params = [yrRange.min, yrRange.max];
+      const aliasLikes = (aliases.length ? aliases.map(_ => `%${_}%`) : [`%${(datum.venue||datum.name||'').toLowerCase()}%`]);
+      const likeExprs = aliasLikes.map(_ => `LOWER(venue_name) LIKE ?`).join(' OR ');
+      // format filtering: if user requested a specific format, add a WHERE clause
+      let formatFilter = '';
+      if (format && format !== 'all') { formatFilter = ` AND LOWER(format) LIKE ?`; params.push(`%${format}%`); }
 
-    // format filter
-  // top-level format filter (used in contexts that reference matches directly)
-  const fmtCond = (format && format !== 'all') ? `AND LOWER(COALESCE(m.format, '')) LIKE ?` : '';
-    const fmtParam = (format && format !== 'all') ? [`%${format}%`] : [];
-
-    // We'll compute metrics per-format (Test, ODI, T20I) and render three polygons. No debug details shown.
-    try {
-      const FORMATS = [
-        { key: 'test', label: 'Test' },
-        { key: 'odi', label: 'ODI' },
-        { key: 't20i', label: 'T20I' }
-      ];
-  const byFormat = {};
-
-      // helper to compute metrics for a single format
-      const formatPatterns = (fmtKey) => {
-        // return an array of lowercase LIKE patterns that match common ways the format appears
-        if (fmtKey === 'test') return ['%test%'];
-        if (fmtKey === 'odi') return ['%odi%', '%one%day%', '%one-day%', '%one day%'];
-        // accept multiple variants for T20 (T20, T20I, Twenty20, t20)
-        if (fmtKey === 't20i') return ['%t20i%', '%t20%', '%twenty%', '%twenty20%'];
-        return [`%${fmtKey}%`];
-      };
-
-      // Check whether the innings tables actually have a `format` column in the runtime DB.
-      // Some DB builds may omit the column for certain tables; using PRAGMA lets us detect that
-      // and avoid SQL that references non-existent columns.
-      function tableHasColumn(tableName, colName) {
-        try {
-          const rows = DB.queryAll(`PRAGMA table_info(${tableName})`);
-          return rows.some(r => String(r.name).toLowerCase() === String(colName).toLowerCase());
-        } catch (e) {
-          console.warn('tableHasColumn failed', tableName, colName, e);
-          return false;
-        }
-      }
-  const battingHasFormat = tableHasColumn('batting_innings', 'format');
-  const bowlingHasFormat = tableHasColumn('bowling_innings', 'format');
-
-      const computeForFormat = (fmtKey) => {
-        const pf = formatPatterns(fmtKey);
-        const fmtParams_local = pf.slice();
-        // build three different format-expressions depending on context:
-        // - when querying an innings table aliased as `bi`, prefer bi.format when available
-        // - when querying matches alone, only reference m.format
-        const battingFmtClause = pf.map(_ => battingHasFormat ? `LOWER(COALESCE(bi.format, m.format, '')) LIKE ?` : `LOWER(COALESCE(m.format, '')) LIKE ?`).join(' OR ');
-        const bowlingFmtClause = pf.map(_ => bowlingHasFormat ? `LOWER(COALESCE(bi.format, m.format, '')) LIKE ?` : `LOWER(COALESCE(m.format, '')) LIKE ?`).join(' OR ');
-        const matchFmtClause = pf.map(_ => `LOWER(COALESCE(m.format, '')) LIKE ?`).join(' OR ');
-
-        // batting
-        let batRows = [];
-        let used = 'none';
-        if (exactClause) {
-          const batExactSQL = `SELECT SUM(CAST(bi.runs AS INT)) AS runs, SUM(CAST(bi.balls AS INT)) AS balls, SUM(CASE WHEN COALESCE(bi.out,'')<>'' THEN 1 ELSE 0 END) AS dismissals, AVG(CAST(bi.boundary_pct AS REAL)) AS boundary_pct FROM batting_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${exactClause}) AND (${battingFmtClause})`;
-          const batExactParams = [yrRange.min, yrRange.max, ...exactParams, ...fmtParams_local];
-          batRows = DB.queryAll(batExactSQL, batExactParams) || [];
-          if (batRows && batRows.length && (batRows[0].runs || batRows[0].balls || batRows[0].dismissals)) used = 'exact';
-        }
-        if (used !== 'exact') {
-          const batLikeSQL = `SELECT SUM(CAST(bi.runs AS INT)) AS runs, SUM(CAST(bi.balls AS INT)) AS balls, SUM(CASE WHEN COALESCE(bi.out,'')<>'' THEN 1 ELSE 0 END) AS dismissals, AVG(CAST(bi.boundary_pct AS REAL)) AS boundary_pct FROM batting_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeClause}) AND (${battingFmtClause})`;
-          const batLikeParams = [yrRange.min, yrRange.max, ...likeParams, ...fmtParams_local];
-          batRows = DB.queryAll(batLikeSQL, batLikeParams) || [];
-          used = used || 'like';
-        }
-        const bat = (batRows && batRows[0]) || {};
-
-        // innings
-        let innRows = [];
-        if (used === 'exact') {
-          const innExactSQL = `SELECT COALESCE(CAST(bi.innings_no AS INT),0) AS innings_no, AVG(CAST(bi.runs AS INT)) AS avg_runs, COUNT(*) AS cnt FROM batting_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${exactClause}) AND (${battingFmtClause}) GROUP BY innings_no ORDER BY innings_no`;
-          const innExactParams = [yrRange.min, yrRange.max, ...exactParams, ...fmtParams_local];
-          innRows = DB.queryAll(innExactSQL, innExactParams) || [];
-        } else {
-          const innLikeSQL = `SELECT COALESCE(CAST(bi.innings_no AS INT),0) AS innings_no, AVG(CAST(bi.runs AS INT)) AS avg_runs, COUNT(*) AS cnt FROM batting_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeClause}) AND (${battingFmtClause}) GROUP BY innings_no ORDER BY innings_no`;
-          const innLikeParams = [yrRange.min, yrRange.max, ...likeParams, ...fmtParams_local];
-          innRows = DB.queryAll(innLikeSQL, innLikeParams) || [];
-        }
-
-        // bowling
-        let bowlRows = [];
-        if (used === 'exact') {
-          const bowlExactSQL = `SELECT SUM(CAST(bi.runs_conceded AS INT)) AS runs_conceded, SUM(CAST(bi.legal_balls AS INT)) AS balls, SUM(CAST(bi.wickets AS INT)) AS wickets FROM bowling_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${exactClause}) AND (${bowlingFmtClause})`;
-          const bowlExactParams = [yrRange.min, yrRange.max, ...exactParams, ...fmtParams_local];
-          bowlRows = DB.queryAll(bowlExactSQL, bowlExactParams) || [];
-        } else {
-          const bowlLikeSQL = `SELECT SUM(CAST(bi.runs_conceded AS INT)) AS runs_conceded, SUM(CAST(bi.legal_balls AS INT)) AS balls, SUM(CAST(bi.wickets AS INT)) AS wickets FROM bowling_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeClause}) AND (${bowlingFmtClause})`;
-          const bowlLikeParams = [yrRange.min, yrRange.max, ...likeParams, ...fmtParams_local];
-          bowlRows = DB.queryAll(bowlLikeSQL, bowlLikeParams) || [];
-        }
-  const bowl = (bowlRows && bowlRows[0]) || {};
-
-        // matches for batting-first calc
-        let matches = [];
-        if (used === 'exact') {
-          const matchExactSQL = `SELECT m.match_id, m.team1, m.team2, m.toss_winner, m.toss_decision, m.winner, COALESCE(m.result_type, '') AS result_type FROM matches m WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${exactClause}) AND (${matchFmtClause})`;
-          const matchExactParams = [yrRange.min, yrRange.max, ...exactParams, ...fmtParams_local];
-          matches = DB.queryAll(matchExactSQL, matchExactParams) || [];
-        } else {
-          const matchLikeSQL = `SELECT m.match_id, m.team1, m.team2, m.toss_winner, m.toss_decision, m.winner, COALESCE(m.result_type, '') AS result_type FROM matches m WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeClause}) AND (${matchFmtClause})`;
-          const matchLikeParams = [yrRange.min, yrRange.max, ...likeParams, ...fmtParams_local];
-          matches = DB.queryAll(matchLikeSQL, matchLikeParams) || [];
-        }
-
-        // batting-first win%
-        let matchesWithResult = 0, battingFirstWins = 0;
-        for (const m of matches){
-          const resType = String(m.result_type || '').toLowerCase();
-          if (resType && (resType.includes('no result') || resType.includes('draw') || resType.includes('tie') || resType.includes('tied'))) continue;
-          const winner = (m.winner || '').trim(); if (!winner) continue;
-          let battingFirst = null;
-          try{
-            const td = String(m.toss_decision || '').toLowerCase();
-            const toss = String(m.toss_winner || '').trim();
-            const t1 = String(m.team1 || '').trim(), t2 = String(m.team2 || '').trim();
-            if (td.includes('bat')) battingFirst = toss;
-            else if (toss && (t1 && t2)) battingFirst = (toss === t1 ? t2 : t1);
-          }catch(e){ battingFirst = null; }
-          if (!battingFirst) continue;
-          matchesWithResult += 1;
-          if (String(winner).trim() === String(battingFirst).trim()) battingFirstWins += 1;
-        }
-
-        const battingFirstPct = matchesWithResult ? (battingFirstWins / matchesWithResult) : null;
-
-        // (diagnostics removed)
-
-        // derived metrics
-        const batting_sr = (bat && bat.balls) ? (100 * (bat.runs / bat.balls)) : null;
-        // when dismissals are unavailable, fall back to runs / total_innings (sum of counts),
-        // not the number of distinct innings_no rows (which was previously used and inflated averages)
-        const totalInningsCount = (innRows && innRows.length) ? innRows.reduce((s, r) => s + (r.cnt || 0), 0) : 0;
-        const batting_avg = (bat && bat.dismissals)
-          ? (bat.runs / bat.dismissals)
-          : (bat && bat.runs ? (bat.runs / Math.max(1, totalInningsCount || 1)) : null);
-        // boundary_pct in the source CSV is stored as a fraction (e.g. 0.04 for 4%), convert to percent
-        const boundary_pct = (bat && bat.boundary_pct != null) ? (+bat.boundary_pct * 100) : null;
-        const bowling_econ = (bowl && bowl.balls) ? (bowl.runs_conceded / (bowl.balls / 6)) : null;
-        const bowling_avg = (bowl && bowl.wickets) ? (bowl.runs_conceded / (bowl.wickets || 1)) : null;
-        const bowling_sr = (bowl && bowl.wickets) ? (bowl.balls / (bowl.wickets || 1)) : null;
-
-        return {
-          batting_sr: batting_sr ? +batting_sr : null,
-          batting_avg: batting_avg ? +batting_avg : null,
-          boundary_pct: boundary_pct ? +boundary_pct : null,
-          bowling_econ: bowling_econ ? +bowling_econ : null,
-          bowling_avg: bowling_avg ? +bowling_avg : null,
-          bowling_sr: bowling_sr ? +bowling_sr : null,
-          innings_by_no: innRows || [],
-          matches_count: matches.length,
-          matches_with_result: matchesWithResult,
-          batting_first_win_pct: battingFirstPct,
-          // include raw query aggregates and the matching strategy used to aid debugging
-          _raw_batting: bat || {},
-          _raw_bowling: bowl || {},
-          _used_match_strategy: used
-        };
-      };
-
-      // compute for each format (sequentially to avoid DB stress)
-      for (const f of FORMATS) {
-        try {
-          byFormat[f.key] = computeForFormat(f.key);
-        } catch (err) {
-          byFormat[f.key] = null;
-          console.warn('computeForFormat failed for', f.key, err);
-        }
-      }
-
-      // attach metrics and render
-      svgEl._metrics = { byFormat }; svgEl.dataset.metrics = JSON.stringify({ byFormat });
-      // populate hidden developer diagnostics panel (toggle with Shift+click on title)
+      const sql = `SELECT * FROM venue_stats WHERE CAST(year AS INT) BETWEEN ? AND ? AND (${likeExprs})${formatFilter}`;
+      const sqlParams = [yrRange.min, yrRange.max, ...aliasLikes.map(x => x), ...(format && format !== 'all' ? [`%${format}%`] : [])];
+      let rows = [];
       try {
-        const diag = panel.querySelector('.venue-diag');
-        if (diag) diag.textContent = JSON.stringify(svgEl._metrics, null, 2);
-      } catch (e) { /* ignore */ }
-  // store in cache (small LRU not implemented; clear if too large)
-  try { _metricsCache.set(JSON.stringify({ id: datum.venue || datum.name || datum.venue_id || '', yr: yrRange, format }), svgEl._metrics); } catch(e) {}
-      drawRadar(svgEl);
-  // hide loading overlay
-  if (loadingOverlay) loadingOverlay.style.display = 'none';
+        rows = DB.queryAll(sql, sqlParams) || [];
+      } catch (e) {
+        console.warn('venue_stats query failed', e);
+        rows = [];
+      }
 
-      // textual summary: overall counts + per-format mini rows
+      // Group rows by normalized format key and aggregate sums
+      const byFormat = { test: null, odi: null, t20i: null };
+      const normFormat = (s) => (String(s||'').toLowerCase().includes('test') ? 'test' : (String(s||'').toLowerCase().includes('odi') ? 'odi' : (String(s||'').toLowerCase().includes('t20') || String(s||'').toLowerCase().includes('twenty') ? 't20i' : 'other')));
+
+      const groups = {};
+      for (const r of rows) {
+        const key = normFormat(r.format);
+        if (key === 'other') continue; // ignore unknown formats
+        if (!groups[key]) groups[key] = {
+          runs:0, balls:0, wickets:0, fours:0, sixes:0, matches:0, innings_count:0,
+          batting_sr_sum:0, batting_sr_w:0,
+          batting_avg_sum:0, batting_avg_w:0,
+          boundary_pct_sum:0, boundary_pct_w:0,
+          bowling_econ_sum:0, bowling_econ_w:0,
+          bowling_avg_sum:0, bowling_avg_w:0,
+          bowling_sr_sum:0, bowling_sr_w:0
+        };
+        const g = groups[key];
+        g.runs += Number(r.runs || 0);
+        g.balls += Number(r.balls || 0);
+        g.wickets += Number(r.wickets || 0);
+        g.fours += Number(r.fours || 0);
+        g.sixes += Number(r.sixes || 0);
+        g.matches += Number(r.matches || 0);
+        g.innings_count += Number(r.innings_count || 0);
+        // weighted sums for precomputed per-year metrics (prefer weighting by matches)
+        const w = Number(r.matches || 0) || 1;
+        if (r.batting_sr != null) { g.batting_sr_sum += Number(r.batting_sr) * w; g.batting_sr_w += w; }
+        if (r.batting_avg != null) { g.batting_avg_sum += Number(r.batting_avg) * w; g.batting_avg_w += w; }
+        const bp = (r['boundary_%'] != null) ? Number(r['boundary_%']) : (r.boundary_pct != null ? Number(r.boundary_pct) : null);
+        if (bp != null) { g.boundary_pct_sum += bp * w; g.boundary_pct_w += w; }
+        if (r.bowling_econ != null) { g.bowling_econ_sum += Number(r.bowling_econ) * w; g.bowling_econ_w += w; }
+        if (r.bowling_avg != null) { g.bowling_avg_sum += Number(r.bowling_avg) * w; g.bowling_avg_w += w; }
+        if (r.bowling_sr != null) { g.bowling_sr_sum += Number(r.bowling_sr) * w; g.bowling_sr_w += w; }
+      }
+
+      ['test','odi','t20i'].forEach(fmt => {
+        const g = groups[fmt];
+        if (!g) { byFormat[fmt] = null; return; }
+        // Use only the explicit metric columns from `venue_stats` (weighted by matches)
+        const batting_sr = g.batting_sr_w ? (g.batting_sr_sum / g.batting_sr_w) : null;
+        const batting_avg = g.batting_avg_w ? (g.batting_avg_sum / g.batting_avg_w) : null;
+        const boundary_pct = g.boundary_pct_w ? (g.boundary_pct_sum / g.boundary_pct_w) : null;
+        const bowling_econ = g.bowling_econ_w ? (g.bowling_econ_sum / g.bowling_econ_w) : null;
+        const bowling_avg = g.bowling_avg_w ? (g.bowling_avg_sum / g.bowling_avg_w) : null;
+        const bowling_sr = g.bowling_sr_w ? (g.bowling_sr_sum / g.bowling_sr_w) : null;
+        byFormat[fmt] = {
+          batting_sr: batting_sr != null ? +batting_sr : null,
+          batting_avg: batting_avg != null ? +batting_avg : null,
+          boundary_pct: boundary_pct != null ? +boundary_pct : null,
+          bowling_econ: bowling_econ != null ? +bowling_econ : null,
+          bowling_avg: bowling_avg != null ? +bowling_avg : null,
+          bowling_sr: bowling_sr != null ? +bowling_sr : null,
+          innings_by_no: [],
+          matches_count: g.matches || 0,
+          _raw_agg: g
+        };
+      });
+
+      svgEl._metrics = { byFormat }; svgEl.dataset.metrics = JSON.stringify({ byFormat });
+      try { const diag = panel.querySelector('.venue-diag'); if (diag) diag.textContent = JSON.stringify(svgEl._metrics, null, 2); } catch(e){}
+      try { _metricsCache.set(JSON.stringify({ id: datum.venue || datum.name || datum.venue_id || '', yr: yrRange, format }), svgEl._metrics); } catch(e){}
+      drawRadar(svgEl);
+      // hide loading overlay if present
+      if (loadingOverlay) loadingOverlay.style.display = 'none';
+
+      // textual summary
       const heat = panel.querySelector('.venue-heat');
       if (heat) {
         const totalMatches = Object.values(byFormat).reduce((s, m) => s + (m && m.matches_count ? m.matches_count : 0), 0);
@@ -764,14 +611,14 @@
           list.appendChild(row);
         });
         heat.appendChild(list);
-        // diagnostics removed
       }
-
-    } catch(e) {
+      return;
+    } catch (e) {
       console.warn('fetchAndRender venue metrics failed', e);
       const heatErr = panel.querySelector('.venue-heat');
       if (heatErr) heatErr.innerHTML = `<div style="color:var(--muted);font-size:.92rem">No metrics available.</div>`;
       svgEl._metrics = null; drawRadar(svgEl);
+      try { if (loadingOverlay) loadingOverlay.style.display = 'none'; } catch(_e){}
     }
   }
 

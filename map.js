@@ -307,8 +307,6 @@
       .on("pointerdown", (event, d) => {
         try { event.stopPropagation(); } catch(e){}
         stopSpin();
-        // show transient loader immediately; global helper manages timeout and cleanup
-        showVenueLoading('Loading venue details...');
       })
       .on("click", (event, d) => {
         event.stopPropagation();

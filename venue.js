@@ -126,10 +126,6 @@
 
   const legend = document.createElement("div");
   legend.className = "venue-card venue-legend";
-    // make legend sit to the right, allow it to grow
-    legend.style.flex = '1 1 240px';
-    legend.style.minWidth = '220px';
-    legend.style.minHeight = "48px";
     // interactive legend will be populated/controlled by JS
     legend.innerHTML = `
       <div class="venue-legend-items" style="display:flex;flex-direction:column;gap:12px;align-items:flex-start;font-size:0.95rem;color:var(--text)"></div>
@@ -137,6 +133,49 @@
 
   topRow.appendChild(radarWrap);
   topRow.appendChild(legend);
+
+  // Tab bar to switch between Radar and Evolution (multi-year heatmap)
+  const tabBar = document.createElement('div');
+  tabBar.className = 'venue-tabbar';
+  tabBar.style.display = 'flex';
+  tabBar.style.gap = '8px';
+  tabBar.style.margin = '8px 0';
+
+  const tabRadar = document.createElement('button');
+  tabRadar.className = 'venue-tab';
+  tabRadar.textContent = 'Radar';
+  tabRadar.setAttribute('aria-pressed', 'true');
+  tabRadar.style.padding = '6px 10px';
+  tabBar.appendChild(tabRadar);
+  // Evolution tab
+  const tabEvo = document.createElement('button');
+  tabEvo.className = 'venue-tab';
+  tabEvo.textContent = 'Evolution';
+  tabEvo.setAttribute('aria-pressed', 'false');
+  tabEvo.style.padding = '6px 10px';
+  tabBar.appendChild(tabEvo);
+
+  // Trajectory container (hidden by default) — contains two charts: batting and bowling
+  // Trajectory charts removed per user request. Only Radar and Evolution remain.
+
+  // Evolution container (heatmap) hidden by default — includes format controls and legend
+  const evoWrap = document.createElement('div');
+  evoWrap.className = 'venue-evolution';
+  evoWrap.style.display = 'none';
+  evoWrap.style.marginTop = '8px';
+  evoWrap.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-weight:600;margin-bottom:6px">Evolution (year × metric)</div>
+      <div class="evo-controls" style="display:flex;gap:8px;align-items:center">
+        <div style="font-size:0.9rem;color:var(--muted);margin-right:6px">Format:</div>
+        <button class="evo-fmt" data-format="all" aria-pressed="true" style="padding:4px 8px;border-radius:6px">All</button>
+        <button class="evo-fmt" data-format="test" aria-pressed="false" style="padding:4px 8px;border-radius:6px">Test</button>
+        <button class="evo-fmt" data-format="odi" aria-pressed="false" style="padding:4px 8px;border-radius:6px">ODI</button>
+  <button class="evo-fmt" data-format="t20" aria-pressed="false" style="padding:4px 8px;border-radius:6px">T20I</button>
+      </div>
+    </div>
+    <div class="evo-legend" style="margin:6px 0 8px;display:flex;gap:8px;flex-wrap:wrap"></div>
+    <svg width="760" height="260" data-role="evo-heatmap"></svg>`;
 
   const heatWrap = document.createElement("div");
   heatWrap.className = "venue-card venue-heat";
@@ -165,7 +204,9 @@
     panel.style.width = '820px';
     panel.style.maxWidth = '92vw';
 
-    contentEl.appendChild(topRow);
+  contentEl.appendChild(tabBar);
+  contentEl.appendChild(topRow);
+  contentEl.appendChild(evoWrap);
     contentEl.appendChild(heatWrap);
     contentEl.appendChild(info);
 
@@ -204,6 +245,20 @@
       });
       itemsWrap.appendChild(btn);
     });
+
+      // Tab switching behavior
+      tabRadar.addEventListener('click', () => {
+        tabRadar.setAttribute('aria-pressed','true'); tabEvo.setAttribute('aria-pressed','false');
+        radarWrap.style.display = 'block'; evoWrap.style.display = 'none';
+        // show the radar format legend when Radar tab is active
+        try { legend.classList.remove('hidden'); } catch(e){}
+      });
+      tabEvo.addEventListener('click', () => {
+        tabRadar.setAttribute('aria-pressed','false'); tabEvo.setAttribute('aria-pressed','true');
+        radarWrap.style.display = 'none'; evoWrap.style.display = 'block';
+        // hide the radar-specific format legend when Evolution tab is active
+        try { legend.classList.add('hidden'); } catch(e){}
+      });
 
     panel.appendChild(header);
     // Toggle diag panel for developers
@@ -249,6 +304,21 @@
       currentFormat = (ev?.detail?.format) || (window.selectedFormat || 'all');
       // if panel is open, refresh metrics
       if (isOpen && currentDatum) fetchAndRender(currentDatum, currentYearRange, currentFormat);
+    });
+
+    // Evolution format buttons: delegate clicks to re-render heatmap with selected format
+    panel.addEventListener('click', (e) => {
+      const btn = e.target.closest && e.target.closest('.evo-fmt');
+      if (!btn) return;
+      const fmt = btn.getAttribute('data-format');
+      // update pressed state
+      panel.querySelectorAll('.evo-fmt').forEach(b => b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'));
+      // re-render using stored rows if available
+      try{
+        const rows = panel._lastRows || [];
+        const yr = panel._lastYrRange || currentYearRange;
+        drawEvolutionHeatmap(rows, yr, fmt);
+      }catch(e){ console.warn('Failed to re-render evolution heatmap for format', fmt, e); }
     });
   }
 
@@ -467,8 +537,13 @@
     });
   }
 
+  // Trajectory charts (multi-line mini-charts) were removed by request.
+  // If needed later, reintroduce a focused, tested implementation.
+
   // fetch aggregated metrics for a venue + year range + format and render radar + textual summaries
   async function fetchAndRender(datum, yrRange = {min:2000,max:2025}, format = 'all'){
+    // normalize format aliases so modules use a consistent key for SQL filtering
+    if (format === 't20i') format = 't20';
     const svgEl = panel.querySelector('svg[data-role="radar"]');
     if (!svgEl) return;
     const radarWrap = panel.querySelector('div > svg[data-role="radar"]')?.parentNode || null;
@@ -528,6 +603,11 @@
         console.warn('venue_stats query failed', e);
         rows = [];
       }
+
+  // store last fetched rows so Evolution controls can re-render without re-query
+  try { panel._lastRows = rows; panel._lastYrRange = yrRange; panel._lastFormat = format; } catch(e){}
+  // Draw evolution heatmap from raw rows for the selected yrRange and format
+  try { drawEvolutionHeatmap(rows, yrRange, format); } catch(e) { console.warn('evolution draw failed', e); }
 
       // Group rows by normalized format key and aggregate sums
       const byFormat = { test: null, odi: null, t20i: null };
@@ -620,6 +700,163 @@
       svgEl._metrics = null; drawRadar(svgEl);
       try { if (loadingOverlay) loadingOverlay.style.display = 'none'; } catch(_e){}
     }
+  }
+
+  // Draw evolution heatmap: rows = metrics, cols = years. Accepts optional format ('all','test','odi','t20i')
+  function drawEvolutionHeatmap(rows, yrRange, format = 'all'){
+    try{
+      const svgEl = panel.querySelector('svg[data-role="evo-heatmap"]');
+      if (!svgEl) return;
+      const svg = d3.select(svgEl); svg.selectAll('*').remove();
+      const w = +svg.attr('width') || 760; const h = +svg.attr('height') || 260;
+      const margin = { top: 28, right: 12, bottom: 28, left: 120 };
+      const iw = w - margin.left - margin.right; const ih = h - margin.top - margin.bottom;
+      const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+      const minY = yrRange.min, maxY = yrRange.max;
+      const years = d3.range(minY, maxY+1);
+      const metrics = [
+        { key: 'batting_sr', label: 'Bat SR' },
+        { key: 'batting_avg', label: 'Bat Avg' },
+        { key: 'boundary_%', label: 'Boundary %' },
+        { key: 'bowling_econ', label: 'Bowl Econ' },
+        { key: 'bowling_avg', label: 'Bowl Avg' },
+        { key: 'bowling_sr', label: 'Bowl SR' },
+        { key: 'matches', label: 'Matches' }
+      ];
+
+      // Filter rows by selected format (if requested)
+      const usedRows = (format && format !== 'all') ? rows.filter(r => {
+        const rf = String(r.format||'').toLowerCase();
+        // accept both 't20' and 't20i' aliases
+        if (format === 't20i' || format === 't20') return rf.includes('t20');
+        return rf.includes(String(format||'').toLowerCase());
+      }) : rows;
+
+      // Build matrix values: metric x year aggregated (weighted by matches)
+      const matrix = metrics.map(m => {
+        return years.map(y => {
+          const rs = (usedRows || []).filter(r => Number(r.year)===y);
+          let num = 0, den = 0;
+          for (const r of rs){
+            const w = Number(r.matches||0) || 1;
+            let v = null;
+            if (m.key === 'matches') v = Number(r.matches||0);
+            else {
+              if (r[m.key] != null) v = Number(r[m.key]);
+              else if (m.key === 'boundary_%' && r.boundary_pct != null) v = Number(r.boundary_pct);
+            }
+            if (v != null){ num += v * w; den += w; }
+          }
+          return den ? (num/den) : null;
+        });
+      });
+
+      // diagnostic: expose rows count and per-metric non-null counts in diag panel
+      try{
+        const diag = panel.querySelector('.venue-diag');
+        if (diag) {
+          const meta = { rowsCount: (rows||[]).length, filteredRows: (usedRows||[]).length, years: years.length, metrics: metrics.map((m,i)=>({ key: m.key, nonNull: matrix[i].filter(v=>v!=null).length })) };
+          diag.textContent = JSON.stringify(meta, null, 2);
+        }
+      }catch(e){}
+
+      // For each metric compute color domain across years and assign a distinct palette per metric
+      const METRIC_PALETTES = {
+        'batting_sr': d3.interpolateRdYlBu,
+        'batting_avg': d3.interpolateBuPu,
+        'boundary_%': d3.interpolateYlGn,
+        'bowling_econ': d3.interpolatePuBuGn,
+        'bowling_avg': d3.interpolateYlOrRd,
+        'bowling_sr': d3.interpolateViridis,
+        'matches': d3.interpolateGreys
+      };
+      const colorScales = metrics.map((m,i) => {
+        const vals = matrix[i].filter(v => v != null);
+        if (!vals.length) return null;
+        const minv = d3.min(vals), maxv = d3.max(vals);
+        const interp = METRIC_PALETTES[m.key] || d3.interpolateYlGnBu;
+        return d3.scaleSequential(interp).domain([minv, maxv]);
+      });
+
+      // Populate HTML legend (per-metric gradients + min/max). Uses the .evo-legend container.
+      try{
+        const legendEl = panel.querySelector('.evo-legend');
+        if (legendEl) {
+          legendEl.innerHTML = '';
+          metrics.forEach((m, i) => {
+            const item = document.createElement('div');
+            item.className = 'evo-legend-item';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '8px';
+            item.style.fontSize = '0.85rem';
+            // color box
+            const box = document.createElement('div');
+            box.style.width = '120px'; box.style.height = '12px'; box.style.borderRadius = '4px';
+            box.style.border = '1px solid rgba(0,0,0,0.06)';
+            if (colorScales[i]){
+              const dom = colorScales[i].domain();
+              const start = colorScales[i](dom[0]);
+              const end = colorScales[i](dom[1]);
+              box.style.background = `linear-gradient(to right, ${start}, ${end})`;
+            } else {
+              box.style.background = '#efefef';
+            }
+            const lbl = document.createElement('div');
+            lbl.style.display = 'flex'; lbl.style.flexDirection = 'column'; lbl.style.justifyContent = 'center';
+            const title = document.createElement('div'); title.textContent = m.label; title.style.color = 'var(--muted)'; title.style.fontSize = '0.85rem';
+            const scaleTxt = document.createElement('div'); scaleTxt.style.color = 'var(--muted)'; scaleTxt.style.fontSize = '0.78rem';
+            if (colorScales[i]){ const dom = colorScales[i].domain(); scaleTxt.textContent = `${Math.round(dom[0]*100)/100} → ${Math.round(dom[1]*100)/100}`; } else { scaleTxt.textContent = 'no data'; }
+            lbl.appendChild(title); lbl.appendChild(scaleTxt);
+            item.appendChild(box); item.appendChild(lbl);
+            legendEl.appendChild(item);
+          });
+        }
+      }catch(e){ /* non-fatal */ }
+
+      // cell sizes
+      const cellW = Math.max(12, Math.floor(iw / Math.max(1, years.length)));
+      const cellH = Math.max(18, Math.floor(ih / metrics.length));
+
+      // draw grid
+      const rowsG = g.append('g').attr('class','heat-rows');
+      metrics.forEach((m, ri) => {
+        const y = ri * cellH;
+        // metric label
+        g.append('text').attr('x', -10).attr('y', y + cellH/2 + 4).attr('text-anchor','end').attr('font-size',11).attr('fill','var(--muted)').text(m.label);
+        const rowVals = matrix[ri];
+        rowVals.forEach((v, ci) => {
+          const x = ci * cellW;
+          const cell = g.append('rect').attr('x', x).attr('y', y).attr('width', cellW-1).attr('height', cellH-2).attr('rx',2).attr('ry',2)
+            .style('stroke','rgba(0,0,0,0.06)').style('stroke-width',0.5)
+            .style('fill', v==null ? '#efefef' : (colorScales[ri] ? colorScales[ri](v) : '#ddd'));
+          // tooltip
+          if (v != null){
+            cell.on('mouseenter', (ev) => {
+              const tip = document.createElement('div');
+              tip.className = 'venue-heat-tip';
+              tip.style.position = 'fixed'; tip.style.zIndex = 2000; tip.style.background='rgba(0,0,0,0.8)'; tip.style.color='white'; tip.style.padding='6px 8px'; tip.style.borderRadius='6px';
+              tip.style.fontSize='0.9rem';
+              tip.textContent = `${m.label} ${years[ci]}: ${typeof v==='number' ? (Math.round((v+Number.EPSILON)*100)/100) : v}`;
+              document.body.appendChild(tip);
+              const rect = ev.target.getBoundingClientRect();
+              tip.style.left = `${rect.right + 8}px`; tip.style.top = `${rect.top}px`;
+              cell.on('mouseleave', () => { try{ tip.remove(); }catch(e){} });
+            });
+          }
+        });
+      });
+
+      // year labels on top
+      const yearsG = g.append('g').attr('transform', `translate(0,${-6})`);
+      years.forEach((y, i) => {
+        const x = i * cellW + cellW/2;
+        yearsG.append('text').attr('x', x).attr('y', -2).attr('font-size',10).attr('text-anchor','middle').attr('fill','var(--muted)').text(y);
+      });
+
+      // Removed bottom SVG legend: per-metric HTML legends are shown above the heatmap
+    }catch(e){ console.warn('drawEvolutionHeatmap failed', e); }
   }
 
   /* API */

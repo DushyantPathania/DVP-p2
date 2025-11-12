@@ -122,8 +122,10 @@ svg { width: 100%; height: 100%; display: block; }
 body.choro-on .country.has-venues { fill: inherit; }
 
 .spike {
-  stroke: rgba(255,255,255,0.9);
-  stroke-width: 2px; stroke-linecap: round; pointer-events: none;
+  stroke-linecap: round; pointer-events: none;
+  /* stroke and width are set in JS to allow dynamic color/weight; provide sensible defaults */
+  stroke: #8b0000;
+  stroke-width: 3.5px;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
 }
 
@@ -544,6 +546,10 @@ body { background: transparent; }
 .venue-legend-item { background: transparent; border: none; color: var(--text); cursor: pointer; padding:6px; border-radius:8px; display:inline-flex; align-items:center; gap:8px; }
 .venue-legend-item[aria-pressed="false"] { opacity: 0.45; }
 .venue-legend-item .legend-dot { box-shadow: 0 6px 18px rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.04); }
+
+/* Venue legend sizing moved from inline styles: keep layout responsive */
+.venue-legend { flex: 1 1 240px; min-width: 220px; min-height: 48px; }
+.venue-legend.hidden { display: none !important; }
 
 /* Radar polygon styles */
 .radar-poly { transition: opacity 160ms ease, transform 180ms ease; }

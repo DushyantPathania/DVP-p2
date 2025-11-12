@@ -26,6 +26,7 @@
   const tabPanel    = document.getElementById("tabpanel");
   const tabBtns     = [document.getElementById("tab-batting"), document.getElementById("tab-bowling")];
   let spikeLegend = null; // created dynamically by createLegendUI()
+  let spikeLegendSection = null;
   const enterBtn    = document.getElementById("enterBtn");
 
   // Year slider elements
@@ -77,6 +78,115 @@
   const venueIndex = new Set();
   let venueCountrySet = new Set();
   let countryFocused  = false;
+  // HTML tooltip element for map & venues
+  let tooltipEl = null;
+
+  function ensureTooltip(){
+    if (tooltipEl) return tooltipEl;
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'map-tooltip';
+    tooltipEl.style.position = 'fixed';
+    tooltipEl.style.zIndex = 2200;
+    tooltipEl.style.pointerEvents = 'none';
+    tooltipEl.style.background = 'rgba(0,0,0,0.78)';
+    tooltipEl.style.color = 'white';
+    tooltipEl.style.padding = '8px 10px';
+    tooltipEl.style.borderRadius = '6px';
+    tooltipEl.style.fontSize = '0.9rem';
+    tooltipEl.style.maxWidth = '320px';
+    tooltipEl.style.boxShadow = '0 6px 18px rgba(0,0,0,0.5)';
+    tooltipEl.style.display = 'none';
+    document.body.appendChild(tooltipEl);
+    return tooltipEl;
+  }
+
+  function showTooltipAt(x, y, html){
+    ensureTooltip();
+    tooltipEl.innerHTML = html;
+    tooltipEl.style.left = (x + 12) + 'px';
+    tooltipEl.style.top = (y + 12) + 'px';
+    tooltipEl.style.display = 'block';
+  }
+  function moveTooltipToEvent(ev){
+    if (!tooltipEl || tooltipEl.style.display === 'none') return;
+    const x = (ev.clientX || (ev.touches && ev.touches[0] && ev.touches[0].clientX) || 0);
+    const y = (ev.clientY || (ev.touches && ev.touches[0] && ev.touches[0].clientY) || 0);
+    tooltipEl.style.left = (x + 12) + 'px';
+    tooltipEl.style.top = (y + 12) + 'px';
+  }
+  function hideTooltip(){ if (tooltipEl) tooltipEl.style.display = 'none'; }
+
+  // Show venue tooltip with aggregated stats (async DB query). Accepts mouse event and venue row.
+  async function showVenueTooltip(ev, d){
+    try{
+      const name = d.venue || d.name || '';
+      const city = d.city || d.town || '';
+      const country = d.country || '';
+      const basic = `<div style="font-weight:600;margin-bottom:6px">${escapeHtml(name)}</div><div style="font-size:0.9rem;color:#dfe6ea;margin-bottom:6px">${escapeHtml(city)} ${country?('&middot; ' + escapeHtml(country)) : ''}</div>`;
+      showTooltipAt(ev.clientX, ev.clientY, basic + '<div style="color:#bcd">Loading…</div>');
+
+      // Aggregate matches from venue_stats where venue_name LIKE name
+      const like = `%${(String(name || d.names || d.name || '').toLowerCase()).replace(/%/g,'')}%`;
+      let rows = [];
+      try{
+        rows = DB.queryAll(`SELECT COALESCE(SUM(CAST(matches AS INT)),0) AS matches, 
+                               SUM(CASE WHEN LOWER(format) LIKE '%t20%' THEN CAST(matches AS INT) ELSE 0 END) AS t20_matches,
+                               SUM(CASE WHEN LOWER(format) LIKE '%odi%' THEN CAST(matches AS INT) ELSE 0 END) AS odi_matches,
+                               SUM(CASE WHEN LOWER(format) LIKE '%test%' THEN CAST(matches AS INT) ELSE 0 END) AS test_matches
+                           FROM venue_stats WHERE LOWER(venue_name) LIKE ?`, [like]) || [];
+      }catch(e){ rows = []; }
+      const agg = (rows && rows[0]) ? rows[0] : { matches:0, t20_matches:0, odi_matches:0, test_matches:0 };
+      const parts = [];
+      parts.push(`<div style="font-size:0.92rem;margin-bottom:6px">Total matches (all years): <strong style="color:#fff">${agg.matches||0}</strong></div>`);
+      parts.push(`<div style="display:flex;gap:8px;font-size:0.88rem;color:#cfe8f5">
+          <div>Test: <strong style="color:#fff">${agg.test_matches||0}</strong></div>
+          <div>ODI: <strong style="color:#fff">${agg.odi_matches||0}</strong></div>
+          <div>T20: <strong style="color:#fff">${agg.t20_matches||0}</strong></div>
+        </div>`);
+
+      // Also include quick link to open full venue panel (if available)
+      parts.push(`<div style="margin-top:8px;font-size:0.85rem;color:#bcd"><button class="map-tooltip-open" style="background:#1f77b4;color:white;border:none;padding:6px 8px;border-radius:6px;cursor:pointer">Open venue details</button></div>`);
+      showTooltipAt(ev.clientX, ev.clientY, basic + parts.join(''));
+
+      // wire button
+      const btn = tooltipEl.querySelector('.map-tooltip-open');
+      if (btn) btn.addEventListener('click', () => { try{ window.VenueWindow.open(d); hideTooltip(); } catch(e){} });
+    }catch(e){ console.warn('showVenueTooltip failed', e); }
+  }
+
+  // Show country tooltip using precomputed choroByCountry and best-known venues
+  async function showCountryTooltip(ev, feature){
+    try{
+      const cname = canonicalMapName(feature.properties?.name || '');
+      const rec = choroByCountry.get(cname) || null;
+      let html = `<div style="font-weight:600;margin-bottom:6px">${escapeHtml(feature.properties?.name || cname)}</div>`;
+      if (!rec) {
+        html += `<div style="color:#bcd">No match data available</div>`;
+        showTooltipAt(ev.clientX, ev.clientY, html); return;
+      }
+      const total = rec.matches || 0; const wins = rec.homeWins || 0; const pct = total ? Math.round((wins/total)*100) : 0;
+      html += `<div style="font-size:0.92rem;margin-bottom:6px">Home wins: <strong style="color:#fff">${pct}%</strong> (${wins}/${total})</div>`;
+      // per-format breakdown
+      const fmts = ['test','odi','t20'];
+      html += '<div style="display:flex;gap:8px;font-size:0.88rem;color:#cfe8f5">';
+      fmts.forEach(f => { const fr = rec.formats && rec.formats[f] ? rec.formats[f] : { matches:0, homeWins:0 }; const mp = fr.matches||0; const wp = fr.homeWins||0; const wpct = mp ? Math.round((wp/mp)*100) : 0; html += `<div style="min-width:80px">${f.toUpperCase()}: <strong style="color:#fff">${mp}</strong><div style="color:#9fb6c8;font-size:0.78rem">win ${wpct}%</div></div>`; });
+      html += '</div>';
+
+      // list up to 3 notable venues (quick query)
+      try{
+        const venues = await loadVenuesForCountry(cname);
+        if (venues && venues.length) {
+          const top = venues.slice(0,3).map(v => escapeHtml(v.venue || v.name || '—'));
+          html += `<div style="margin-top:8px;color:#bcd;font-size:0.86rem">Notable venues: <strong style="color:#fff">${top.join(', ')}</strong></div>`;
+        }
+      }catch(e){ /* ignore */ }
+
+      showTooltipAt(ev.clientX, ev.clientY, html);
+    }catch(e){ console.warn('showCountryTooltip failed', e); }
+  }
+
+  // small HTML escape
+  function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   // Year range
   const YEAR_MIN = 2000, YEAR_MAX = 2025;
@@ -85,7 +195,9 @@
   // Choropleth + spikes
   let choroActive     = false;
   let choroByCountry  = new Map(); // key -> {matches, homeWins, winPct}
-  let spikeScale      = d3.scaleSqrt().domain([0,1]).range([0, 30]);
+  // Use a linear spike scale so heights are more directly proportional to match counts
+  // and increase the maximum pixel range so spikes are more visible on the globe.
+  let spikeScale      = d3.scaleLinear().domain([0,1]).range([0, 40]);
 
   /* ----------------------------- Demo leaderboard -------------------------- */
   const battingData = [
@@ -176,8 +288,8 @@
       .data(countries, d => d.id)
       .join("path")
       .attr("class","country")
-      .on("mouseenter", (event, d) => { hoveredId = d.id; d3.select(event.currentTarget).raise(); updateHoverTransform(); })
-      .on("mouseleave", () => { hoveredId = null; updateHoverTransform(); })
+      .on("mouseenter", (event, d) => { hoveredId = d.id; d3.select(event.currentTarget).raise(); updateHoverTransform(); try { showCountryTooltip(event, d); } catch(e){} })
+      .on("mouseleave", (event, d) => { hoveredId = null; updateHoverTransform(); try { hideTooltip(); } catch(e){} })
       .on("click", (event, d) => handleCountryClick(d))
       .attr("d", path);
 
@@ -315,7 +427,11 @@
         try { VenueWindow.open(d); } catch (e) { hideVenueLoading(); console.warn('VenueWindow.open failed', e); }
       });
 
-    enter.append("title").text(d => d.venue || d.name || "Venue");
+    // replace simple <title> with richer HTML tooltip handlers
+    enter
+      .on('pointerenter', (event, d) => { try { showVenueTooltip(event, d); } catch(e){} })
+      .on('pointermove', (event, d) => { try { moveTooltipToEvent(event); } catch(e){} })
+      .on('pointerleave', (event, d) => { try { hideTooltip(); } catch(e){} });
 
     updateVenuesPosition();
   }
@@ -453,7 +569,8 @@
       if (selectedFormat === 'all') return d.matches;
       return d.formats[selectedFormat] ? d.formats[selectedFormat].matches : 0;
     }) || 1;
-    spikeScale.domain([0, maxMatches]).range([0, mode==="globe" ? 32 : 40]);
+  // make globe spikes taller for visibility; use a larger max pixel height
+  spikeScale.domain([0, maxMatches]).range([0, mode==="globe" ? 56 : 40]);
 
     document.body.classList.toggle("choro-on", choroActive);
     renderSpikeLegend(maxMatches);
@@ -476,20 +593,16 @@
         })
       .selectAll("title").remove();
 
-    gCountries.selectAll("path.country").append("title")
-      .text(d => {
-        const key = canonicalMapName(d.properties?.name || "");
-          const rec = choroByCountry.get(key);
-          if (!rec) return d.properties?.name || "";
-          const fmtRec = (selectedFormat === 'all') ? rec : (rec.formats[selectedFormat] && rec.formats[selectedFormat].matches ? rec.formats[selectedFormat] : null);
-          const pct = Math.round(((fmtRec ? (fmtRec.winPct ?? 0) : rec.winPct) * 100));
-          const m = fmtRec ? fmtRec.matches : rec.matches;
-          const w = fmtRec ? fmtRec.homeWins : rec.homeWins;
-          return `${d.properties?.name}: Home wins ${pct}% (${w}/${m})`;
-      });
+    // Titles replaced by richer HTML tooltips handled in mouseenter/mouseleave
   }
 
   function drawSpikes(){
+    // Do not render spikes in 2D map mode — spikes are a 3D/globe visual.
+    if (mode === 'map') {
+      // ensure any previously-created spikes are removed/hidden when switching to map
+      try { gSpikes.selectAll('*').remove(); } catch(e) {}
+      return;
+    }
     const data = [];
     countries.forEach(f => {
       const key = canonicalMapName(f.properties?.name || "");
@@ -506,15 +619,24 @@
 
     const sel = gSpikes.selectAll("line.spike").data(data, d => d.key);
     sel.exit().remove();
+    // use a high-contrast dark-red stroke for spikes and make them thicker
+    const SPIKE_COLOR = '#8b0000';
     sel.enter().append("line").attr("class","spike")
   .merge(sel)
-  .attr("stroke", d => (colorScales[selectedFormat] || colorScales.all)(d.winPct))
+  .attr("stroke", SPIKE_COLOR)
+  .attr("stroke-width", 3.5)
   .attr("opacity", 0.95);
 
     updateSpikesPosition();
   }
 
   function updateSpikesPosition(){
+    // If map-mode, hide spikes entirely (they are a globe-only visual)
+    if (mode === 'map') {
+      gSpikes.selectAll("line.spike").style('display', 'none');
+      return;
+    }
+
     gSpikes.selectAll("line.spike").each(function(d){
       const p = projection([d.lon, d.lat]);
       if (!p) return;
@@ -535,15 +657,26 @@
     svgL.selectAll("*").remove();
     const w = +svgL.attr("width"), h = +svgL.attr("height");
     const cx = 24, baseY = h - 8;
-    const scale = d3.scaleSqrt().domain([0, maxMatches]).range([0, 34]);
-    const ticks = scale.ticks(3);
-    svgL.append("line").attr("x1", cx).attr("y1", baseY).attr("x2", cx).attr("y2", baseY - scale(maxMatches))
-      .attr("stroke", "#fff").attr("stroke-width", 2).attr("opacity", 0.8);
+    // Use the same spikeScale so legend matches rendered spike heights.
+    // Ensure we copy the current domain/range for local computations.
+    const localScale = spikeScale.copy ? spikeScale.copy() : d3.scaleLinear().domain([0, maxMatches]).range([0, 34]);
+    // If the global spikeScale range is larger (globe mode), reflect that in legend height
+    // but keep it visually constrained to the legend box.
+    const maxPx = Math.min(56, (localScale(maxMatches) || 34));
+    localScale.range([0, maxPx]).domain([0, maxMatches]);
+    const ticks = (localScale.ticks && typeof localScale.ticks === 'function') ? localScale.ticks(3) : d3.scaleLinear().domain([0, maxMatches]).ticks(3);
+  const SPIKE_COLOR = '#8b0000'; // dark red for legend lines/text
+    // main spike line
+    svgL.append("line").attr("x1", cx).attr("y1", baseY).attr("x2", cx).attr("y2", baseY - localScale(maxMatches))
+      .attr("stroke", SPIKE_COLOR).attr("stroke-width", 2).attr("opacity", 0.95);
+    // ticks + labels
     ticks.forEach(t => {
-      const y = baseY - scale(t);
-      svgL.append("line").attr("x1", cx-6).attr("y1", y).attr("x2", cx+6).attr("y2", y).attr("stroke", "#fff").attr("opacity",0.6);
-      svgL.append("text").attr("x", cx+12).attr("y", y+3).attr("fill","#fff").attr("font-size", 11).text(t);
+      const y = baseY - localScale(t);
+      svgL.append("line").attr("x1", cx-6).attr("y1", y).attr("x2", cx+6).attr("y2", y).attr("stroke", SPIKE_COLOR).attr("opacity",0.8);
+      svgL.append("text").attr("x", cx+12).attr("y", y+4).attr("fill",SPIKE_COLOR).attr("font-size", 11).text(t);
     });
+    // explanatory label (smaller) to clarify the metric
+    svgL.append('text').attr('x', 6).attr('y', 12).attr('fill', SPIKE_COLOR).attr('font-size', 11).text('Spike height = matches hosted');
   }
 
   /* ------------------------- Focus helpers (globe / map) ------------------ */
@@ -622,11 +755,12 @@
     grad.append('div').attr('class','legend-scale').html('<span>0%</span><span>50%</span><span>100%</span>');
 
     // Section: spike legend (svg)
-    const sec2 = legend.append('div').attr('class','legend-section');
-    sec2.append('div').attr('class','legend-title').text('Win spikes = matches hosted');
+  const sec2 = legend.append('div').attr('class','legend-section spike-section');
+  sec2.append('div').attr('class','legend-title').text('Win spikes = matches hosted');
     // attach an svg for spike legend
-    const svgEl = sec2.append('svg').attr('width', 160).attr('height', 72);
-    spikeLegend = svgEl.node();
+  const svgEl = sec2.append('svg').attr('width', 160).attr('height', 72);
+  spikeLegend = svgEl.node();
+  spikeLegendSection = sec2.node();
 
     // Position the legend: top-right, below toggle
     // CSS `.legend` rules provide baseline styling; adjust position relative to toggle
@@ -766,10 +900,12 @@
       resize(); redrawAll(); startSpin();
     }
     updateToggleUI(true);
-    // reflect map vs globe in body class so UI (legend) can adapt
-    document.body.classList.toggle('map-mode', mode === 'map');
+  // reflect map vs globe in body class so UI (legend) can adapt
+  document.body.classList.toggle('map-mode', mode === 'map');
+  // hide spike legend when in 2D map mode (spikes are a globe visual)
+  try { if (spikeLegendSection) spikeLegendSection.style.display = (mode === 'map' ? 'none' : 'block'); } catch(e){}
     const maxMatches = d3.max(Array.from(choroByCountry.values()||[]), d => d.matches) || 1;
-    spikeScale.range([0, mode==="globe" ? 32 : 40]);
+  spikeScale.range([0, mode==="globe" ? 56 : 40]);
     updateSpikesPosition();
   }
 

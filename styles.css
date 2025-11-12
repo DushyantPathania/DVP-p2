@@ -302,6 +302,7 @@ body.choro-on .country.has-venues { fill: inherit; }
   box-shadow: 0 4px 12px rgba(0,0,0,0.35);
   pointer-events: auto; cursor: grab;
   transition: left 160ms ease;
+  z-index: 2; /* ensure thumbs sit above fill/track by default */
 }
 .yr-thumb:active { cursor: grabbing; }
 .yr-bubble{
@@ -317,6 +318,12 @@ body.choro-on .country.has-venues { fill: inherit; }
 .year-box.dragging .yr-thumb,
 .year-box.dragging .yr-fill,
 .year-box.dragging .yr-bubble { transition: none !important; }
+
+/* While dragging, make the active thumb visually above the other thumb as a fallback */
+.year-box.dragging .yr-thumb { z-index: 3; }
+
+/* Active thumb state when being dragged */
+.yr-thumb.active { z-index: 4; transform: translate(-50%, -50%) scale(1.08); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
 
 /* ===== Toast ============================================================= */
 .toast{
@@ -483,10 +490,15 @@ body.landing #globe{
 }
 
 /* Ensure proper stacking: backdrop sits under the overlay so clicks inside the overlay
-   are not intercepted by the backdrop. Use high z-index values to avoid conflicts
-   with other fixed UI (legend/toggle). */
-#backdrop { z-index: 1201; }
+  are not intercepted by the backdrop. Place the year slider above the backdrop so
+  it remains interactive, but keep the overlay above the slider. */
+/* backdrop: below most UI */
+#backdrop { z-index: 1000; }
+/* legend and overlay keep their high values; overlay must remain above slider */
 #leaderboardOverlay { z-index: 1203; }
+
+/* Keep the year slider above the backdrop but below overlay/legend */
+.year-box { z-index: 1201; }
 
 /* Ensure the SVG/globe never paints an opaque fill */
 #globe, #globe svg { background: transparent; }

@@ -14,7 +14,7 @@
   const DB_URL = "https://raw.githubusercontent.com/DushyantPathania/DVP-p2/main/data/db/cricket.db";
 
   const ICON_PATH  = "data/icon/CricketStadium.png";
-  const ICON_BASE  = 16;
+  const ICON_BASE  = 10;
   const SPIN_DEG_PER_SEC = 3;
 
   /* ------------------------------ DOM ------------------------------------- */
@@ -485,6 +485,60 @@
     });
   }
 
+  /* ------------------------- Focus helpers (globe / map) ------------------ */
+  // Smoothly rotate the globe to center on the feature's centroid
+  function focusGlobeOn(feature){
+    return new Promise((resolve) => {
+      try{
+        const c = d3.geoCentroid(feature);
+        if (!c || !isFinite(c[0]) || !isFinite(c[1])) { resolve(); return; }
+        const targetRot = [-c[0], -c[1], 0];
+        const currentRot = projection.rotate();
+
+        // First animate rotation to center the feature
+        const rotInterp = d3.interpolate(currentRot, targetRot);
+        d3.transition().duration(700).tween('rotate', () => t => { projection.rotate(rotInterp(t)); redrawAll(); })
+          .on('end', () => {
+            // After rotation, compute feature bounds and pick a reasonable zoom factor
+            try{
+              const b = path.bounds(feature);
+              const rect = container.getBoundingClientRect();
+              const width = Math.max(1, rect.width), height = Math.max(1, rect.height);
+              const dx = Math.max(4, Math.abs(b[1][0] - b[0][0]));
+              const dy = Math.max(4, Math.abs(b[1][1] - b[0][1]));
+              // desired scale factor relative to current baseScale: want feature to fill ~40-60% of view
+              const scaleX = width / dx; const scaleY = height / dy;
+              // increase multiplier so the focused country zooms in more strongly
+              let desiredK = Math.min(12, Math.max(1, 0.75 * Math.min(scaleX, scaleY)));
+              // animate globeZoomK from current to desired (smoother duration)
+              const startK = globeZoomK || 1;
+              const kInterp = d3.interpolateNumber(startK, desiredK);
+              d3.transition().duration(600).tween('zoomk', () => t => { globeZoomK = kInterp(t); projection.scale(baseScale * globeZoomK); redrawAll(); }).on('end', resolve);
+            }catch(e){ console.warn('post-rotate focus adjustments failed', e); resolve(); }
+          });
+      }catch(e){ console.warn('focusGlobeOn failed', e); resolve(); }
+    });
+  }
+
+  // Zoom & pan the flat map to fit the feature into view
+  function focusMapOn(feature){
+    return new Promise((resolve) => {
+      try{
+        const bounds = path.bounds(feature);
+        const rect = container.getBoundingClientRect();
+        const width = Math.max(1, rect.width), height = Math.max(1, rect.height);
+        const dx = bounds[1][0] - bounds[0][0];
+        const dy = bounds[1][1] - bounds[0][1];
+        const x = (bounds[0][0] + bounds[1][0]) / 2;
+        const y = (bounds[0][1] + bounds[1][1]) / 2;
+        const scale = Math.max(1, 0.8 * Math.min(width / dx, height / dy));
+        const translate = [width / 2 - scale * x, height / 2 - scale * y];
+        const t = d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale);
+        svg.transition().duration(700).call(zoomMap.transform, t).on('end', resolve);
+      }catch(e){ console.warn('focusMapOn failed', e); resolve(); }
+    });
+  }
+
   // Create legend UI using D3 and place it to the right, below the toggle
   function createLegendUI(){
     // Remove any existing legend created earlier
@@ -589,7 +643,17 @@
 
   const zoomGlobe = d3.zoom()
     .scaleExtent([0.4, 32])
-    .filter((event) => event.type === "wheel" || event.type === "touchstart")
+    .filter(function(event){
+      // allow wheel (mouse wheel) and touchstart/pointer interactions (primary button)
+      if (!event) return false;
+      if (event.type === 'wheel') return true;
+      if (event.type === 'touchstart') return true;
+      if (event.type === 'pointerdown' || event.type === 'mousedown') {
+        // only primary button
+        return (typeof event.button === 'number') ? (event.button === 0) : true;
+      }
+      return false;
+    })
     .on("zoom", (event) => { globeZoomK = event.transform.k; projection.scale(baseScale * globeZoomK); redrawAll(); });
 
   const zoomMap = d3.zoom()
@@ -914,8 +978,18 @@
   async function handleCountryClick(feature){
     const name = canonicalMapName(feature.properties?.name || "");
     if (!name) return;
+    // If we don't know of any venues for this country, show a friendly message
+    if (!venueCountrySet || !venueCountrySet.has(name)){
+      const pretty = feature.properties?.name || name;
+      // playful but informative message; don't attempt to load venues
+      toast(`${pretty} seems quiet — no stadiums on record here. Try a neighbouring country!`);
+      // hide toast after short delay
+      setTimeout(() => toastHide(), 1400);
+      return;
+    }
+
     countryFocused = true; stopSpin();
-    toast(`Loading venues for ${feature.properties?.name || "country"}…`);
+    toast(`Searching stadiums in ${feature.properties?.name || "country"}…`);
     if (mode === "globe") await focusGlobeOn(feature); else await focusMapOn(feature);
     try {
       const rows = await loadVenuesForCountry(name);
@@ -961,6 +1035,39 @@
     yearBox?.addEventListener(ev, e => e.stopPropagation(), { passive: true })
   );
 
+  /* ------------------------- Venue DB helpers ----------------------------- */
+  // Return an array (Set-like) of canonical country names that have venues in the DB
+  async function loadVenueCountries(){
+    try{
+      const schema = await getVenueSchema();
+      if (!schema || !schema.countryCol) return new Set();
+      const col = schema.countryCol;
+      const rows = await DB.queryAll(`SELECT DISTINCT ${col} AS country FROM venues WHERE ${col} IS NOT NULL`);
+      const s = new Set();
+      for (const r of rows){ if (r && r.country) s.add(canonicalMapName(r.country)); }
+      return s;
+    }catch(e){ console.warn('loadVenueCountries failed', e); return new Set(); }
+  }
+
+  // Load venue rows for a canonical country name. Uses a case-insensitive LIKE match
+  async function loadVenuesForCountry(name){
+    try{
+      const schema = await getVenueSchema();
+      if (!schema || !schema.countryCol) return [];
+      const col = schema.countryCol;
+      const q = `SELECT * FROM venues WHERE LOWER(COALESCE(${col},'')) LIKE ?`;
+      const rows = await DB.queryAll(q, [`%${String(name).toLowerCase()}%`]);
+      // Normalize numeric coordinates if possible
+      return (rows || []).map(r => {
+        // ensure lat/lon keys exist in consistent names
+        const out = Object.assign({}, r);
+        if (schema.lonCol && !out.longitude && out.hasOwnProperty(schema.lonCol)) out.longitude = out[schema.lonCol];
+        if (schema.latCol && !out.latitude && out.hasOwnProperty(schema.latCol)) out.latitude = out[schema.latCol];
+        return out;
+      });
+    }catch(e){ console.warn('loadVenuesForCountry failed', e); return []; }
+  }
+
   // landing → full view
   enterBtn?.addEventListener("click", () => {
   document.body.classList.remove("landing"); // show UI, hero hidden
@@ -998,20 +1105,24 @@
   function initYearBox(recomputeOnly){
     if (!yearBox || !yrSlider || !yrTrack || !yrThumbL || !yrThumbR) return;
 
-    const trackRect = yrTrack.getBoundingClientRect();
-    const W = trackRect.width;
-
-    const xToYear = d3.scaleLinear().domain([0, W]).range([YEAR_MIN, YEAR_MAX]);
-    const yearToX = d3.scaleLinear().domain([YEAR_MIN, YEAR_MAX]).range([0, W]);
-
-    let vL = yearRange?.min ?? YEAR_MIN;
-    let vR = yearRange?.max ?? YEAR_MAX;
-
-    const sliderRect = yrSlider.getBoundingClientRect();
-    const trackLeftInSlider = trackRect.left - sliderRect.left;
+    // initial values
+    let vL = Number.isFinite(yearRange?.min) ? +yearRange.min : YEAR_MIN;
+    let vR = Number.isFinite(yearRange?.max) ? +yearRange.max : YEAR_MAX;
 
     function render(emit=true){
+      // compute current geometry each render (robust to layout shifts)
+      const trackRect = yrTrack.getBoundingClientRect();
+      const sliderRect = yrSlider.getBoundingClientRect();
+      const W = Math.max(1, trackRect.width);
+      const trackLeftInSlider = trackRect.left - sliderRect.left;
+
+      const xToYear = d3.scaleLinear().domain([0, W]).range([YEAR_MIN, YEAR_MAX]);
+      const yearToX = d3.scaleLinear().domain([YEAR_MIN, YEAR_MAX]).range([0, W]);
+
       if (vL > vR) [vL, vR] = [vR, vL];
+      vL = clamp(Math.round(vL), YEAR_MIN, YEAR_MAX);
+      vR = clamp(Math.round(vR), YEAR_MIN, YEAR_MAX);
+
       const xL = yearToX(vL);
       const xR = yearToX(vR);
 
@@ -1034,34 +1145,66 @@
     if (recomputeOnly) { render(false); return; }
 
     const dragLeft = d3.drag()
-      .on("start", () => yearBox.classList.add("dragging"))
+      .on("start", function(event) {
+        yearBox.classList.add("dragging");
+        try { d3.select(this).raise(); } catch(e){}
+        d3.select(this).classed('active', true);
+      })
       .on("drag", (event) => {
+        const trackRect = yrTrack.getBoundingClientRect();
+        const W = Math.max(1, trackRect.width);
         const [px] = d3.pointer(event, yrTrack);
-        const x = clamp(px, 0, yearToX(vR));
-        vL = Math.round(xToYear(x));
+        const clampedPx = clamp(px, 0, W);
+        const xToYear = d3.scaleLinear().domain([0, W]).range([YEAR_MIN, YEAR_MAX]);
+        const yearToX = d3.scaleLinear().domain([YEAR_MIN, YEAR_MAX]).range([0, W]);
+        const maxX = yearToX(vR);
+        const finalPx = clamp(clampedPx, 0, maxX);
+        vL = Math.round(xToYear(finalPx));
         render();
       })
-      .on("end", () => yearBox.classList.remove("dragging"));
+      .on("end", function() { yearBox.classList.remove("dragging"); d3.select(this).classed('active', false); });
 
     const dragRight = d3.drag()
-      .on("start", () => yearBox.classList.add("dragging"))
+      .on("start", function(event) {
+        yearBox.classList.add("dragging");
+        try { d3.select(this).raise(); } catch(e){}
+        d3.select(this).classed('active', true);
+      })
       .on("drag", (event) => {
+        const trackRect = yrTrack.getBoundingClientRect();
+        const W = Math.max(1, trackRect.width);
         const [px] = d3.pointer(event, yrTrack);
-        const x = clamp(px, yearToX(vL), W);
-        vR = Math.round(xToYear(x));
+        const clampedPx = clamp(px, 0, W);
+        const xToYear = d3.scaleLinear().domain([0, W]).range([YEAR_MIN, YEAR_MAX]);
+        const yearToX = d3.scaleLinear().domain([YEAR_MIN, YEAR_MAX]).range([0, W]);
+        const minX = yearToX(vL);
+        const finalPx = clamp(clampedPx, minX, W);
+        vR = Math.round(xToYear(finalPx));
         render();
       })
-      .on("end", () => yearBox.classList.remove("dragging"));
+      .on("end", function() { yearBox.classList.remove("dragging"); d3.select(this).classed('active', false); });
 
     d3.select(yrThumbL).call(dragLeft);
     d3.select(yrThumbR).call(dragRight);
 
     d3.select(yrTrack).on("mousedown touchstart", (event) => {
+      // recompute geometry
+      const trackRect = yrTrack.getBoundingClientRect();
+      const sliderRect = yrSlider.getBoundingClientRect();
+      const W = Math.max(1, trackRect.width);
+      const xToYear = d3.scaleLinear().domain([0, W]).range([YEAR_MIN, YEAR_MAX]);
+      const yearToX = d3.scaleLinear().domain([YEAR_MIN, YEAR_MAX]).range([0, W]);
       const [px] = d3.pointer(event, yrTrack);
-      const val = Math.round(xToYear(clamp(px, 0, W)));
-      const dL = Math.abs(val - vL);
-      const dR = Math.abs(val - vR);
-      if (dL <= dR) vL = Math.min(val, vR); else vR = Math.max(val, vL);
+      const clampedPx = clamp(px, 0, W);
+      // decide which thumb is nearer in pixel space
+      const xL = yearToX(vL), xR = yearToX(vR);
+      const dL = Math.abs(clampedPx - xL), dR = Math.abs(clampedPx - xR);
+      const val = Math.round(xToYear(clampedPx));
+      if (dL <= dR) {
+        vL = clamp(val, YEAR_MIN, vR);
+      } else {
+        vR = clamp(val, vL, YEAR_MAX);
+      }
       render();
     });
 

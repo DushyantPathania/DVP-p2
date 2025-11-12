@@ -198,6 +198,42 @@
   function toast(msg){ toastEl.textContent = msg; toastEl.classList.add("show"); }
   function toastHide(){ toastEl.classList.remove("show"); }
 
+  // Transient venue-loading dialog shown when a venue icon is clicked until the
+  // VenueWindow actually opens (fires `venuewindow:open`). Idempotent helpers.
+  function showVenueLoading(msg = 'Loading venue details...'){
+    let el = document.getElementById('venue-loading-dialog');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'venue-loading-dialog';
+      el.setAttribute('role','status');
+      el.setAttribute('aria-live','polite');
+      el.style.position = 'fixed';
+      el.style.left = '0';
+      el.style.top = '0';
+      el.style.right = '0';
+      el.style.bottom = '0';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.zIndex = 1400; // above the backdrop used by venue popup (1305)
+      el.style.background = 'rgba(0,0,0,0.32)';
+      const inner = document.createElement('div');
+      inner.style.background = 'rgba(0,0,0,0.7)';
+      inner.style.color = 'white';
+      inner.style.padding = '14px 18px';
+      inner.style.borderRadius = '8px';
+      inner.style.fontSize = '1rem';
+      inner.style.boxShadow = '0 6px 18px rgba(0,0,0,0.5)';
+      inner.textContent = msg;
+      el.appendChild(inner);
+      document.body.appendChild(el);
+    } else {
+      el.style.display = 'flex';
+      const inner = el.firstChild; if (inner) inner.textContent = msg;
+    }
+  }
+  function hideVenueLoading(){ const el = document.getElementById('venue-loading-dialog'); if (el) el.style.display = 'none'; }
+
   /* ------------------------- Schema Introspection -------------------------- */
   let schemaCache = null;
   async function getVenueSchema() {
@@ -253,7 +289,14 @@
       .on("click", (event, d) => {
         event.stopPropagation();
         stopSpin();
-        VenueWindow.open(d);
+        // show transient full-screen loader until the venue popup opens
+        showVenueLoading('Loading venue details...');
+        const onOpen = () => { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); };
+        window.addEventListener('venuewindow:open', onOpen);
+        // fallback: ensure loader is hidden after 10s to avoid stuck overlay
+        const to = setTimeout(() => { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); clearTimeout(to); }, 10000);
+        // open the venue popup (it will dispatch 'venuewindow:open' when ready)
+        try { VenueWindow.open(d); } catch (e) { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); console.warn('VenueWindow.open failed', e); }
       });
 
     enter.append("title").text(d => d.venue || d.name || "Venue");

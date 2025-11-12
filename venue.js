@@ -75,11 +75,25 @@
     titleEl.className = "venue-title";
     titleEl.textContent = "Venue";
 
+  // developer diagnostics panel (hidden by default). Toggle with Shift+click on title.
+  const diagPanel = document.createElement('pre');
+  diagPanel.className = 'venue-diag';
+  diagPanel.style.display = 'none';
+  diagPanel.style.whiteSpace = 'pre-wrap';
+  diagPanel.style.maxHeight = '180px';
+  diagPanel.style.overflow = 'auto';
+  diagPanel.style.margin = '8px 0';
+  diagPanel.style.padding = '8px';
+  diagPanel.style.background = 'rgba(0,0,0,0.06)';
+  diagPanel.style.color = 'var(--muted)';
+  diagPanel.textContent = '';
+
     badgeEl = document.createElement("span");
     badgeEl.className = "venue-badge";
     badgeEl.textContent = "2000–2025";
 
-    left.appendChild(titleEl);
+  left.appendChild(titleEl);
+  left.appendChild(diagPanel);
     left.appendChild(badgeEl);
 
     const closeBtn = document.createElement("button");
@@ -209,6 +223,12 @@
     });
 
     panel.appendChild(header);
+    // Toggle diag panel for developers
+    titleEl.addEventListener('click', (e) => {
+      if (e.shiftKey) {
+        diagPanel.style.display = diagPanel.style.display === 'none' ? 'block' : 'none';
+      }
+    });
     panel.appendChild(contentEl);
     document.body.appendChild(panel);
 
@@ -324,14 +344,54 @@
       return;
     }
 
-    // map metrics to normalized 0..1 per-axis using sensible domains (clamped)
+    // Build unified axis domains from available per-format metrics so every radar
+    // uses sensible, data-driven ranges. If data is missing, fall back to safe defaults.
+    const collected = {
+      bat_sr: [], bat_avg: [], boundary_pct: [], bowl_eco: [], bowl_avg: [], bowl_sr: []
+    };
+    let totalMatchesAcross = 0;
+    Object.keys(metricsByFormat).forEach(k => {
+      const m = metricsByFormat[k];
+      if (!m) return;
+      const mc = m.matches_count || 0;
+      totalMatchesAcross += mc;
+      if (m.batting_sr != null) collected.bat_sr.push({ v: +m.batting_sr, w: mc || 1 });
+      if (m.batting_avg != null) collected.bat_avg.push({ v: +m.batting_avg, w: mc || 1 });
+      if (m.boundary_pct != null) collected.boundary_pct.push({ v: +m.boundary_pct, w: mc || 1 });
+      if (m.bowling_econ != null) collected.bowl_eco.push({ v: +m.bowling_econ, w: mc || 1 });
+      if (m.bowling_avg != null) collected.bowl_avg.push({ v: +m.bowling_avg, w: mc || 1 });
+      if (m.bowling_sr != null) collected.bowl_sr.push({ v: +m.bowling_sr, w: mc || 1 });
+    });
+
+    function computeDomain(arr, defLow, defHigh, invert) {
+      if (!arr || !arr.length) return [defLow, defHigh];
+      const vals = arr.map(x => x.v);
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      // if min==max (single-value) expand a bit
+      const pad = (max - min) === 0 ? Math.max(1, Math.abs(max) * 0.1) : (max - min) * 0.12;
+      const low = Math.max(0, min - pad);
+      const high = max + pad;
+      // for inverted axes (lower is better) we want domain [high, low] so higher map to lower score
+      return invert ? [high, low] : [low, high];
+    }
+
+    const domains = {
+      bat_sr: computeDomain(collected.bat_sr, 60, 160, false),
+      bat_avg: computeDomain(collected.bat_avg, 5, 60, false),
+      boundary_pct: computeDomain(collected.boundary_pct, 0, 40, false),
+      bowl_eco: computeDomain(collected.bowl_eco, 2, 8, true),
+      bowl_avg: computeDomain(collected.bowl_avg, 10, 80, true),
+      bowl_sr: computeDomain(collected.bowl_sr, 20, 120, true)
+    };
+
     const scales = {
-      bat_sr: d3.scaleLinear().domain([60,160]).clamp(true).range([0,1]),
-      bat_avg: d3.scaleLinear().domain([5,60]).clamp(true).range([0,1]),
-      boundary_pct: d3.scaleLinear().domain([0,40]).clamp(true).range([0,1]),
-      bowl_eco: d3.scaleLinear().domain([8,2]).clamp(true).range([0,1]), // lower econ -> higher score
-      bowl_avg: d3.scaleLinear().domain([80,10]).clamp(true).range([0,1]), // lower avg -> higher
-      bowl_sr: d3.scaleLinear().domain([120,20]).clamp(true).range([0,1]) // lower balls/wkt -> higher
+      bat_sr: d3.scaleLinear().domain(domains.bat_sr).clamp(true).range([0,1]),
+      bat_avg: d3.scaleLinear().domain(domains.bat_avg).clamp(true).range([0,1]),
+      boundary_pct: d3.scaleLinear().domain(domains.boundary_pct).clamp(true).range([0,1]),
+      bowl_eco: d3.scaleLinear().domain(domains.bowl_eco).clamp(true).range([0,1]),
+      bowl_avg: d3.scaleLinear().domain(domains.bowl_avg).clamp(true).range([0,1]),
+      bowl_sr: d3.scaleLinear().domain(domains.bowl_sr).clamp(true).range([0,1])
     };
     const FORMATS = [
       { key: 'test', color: '#e6cf9a' },
@@ -341,10 +401,11 @@
 
     const line = d3.lineRadial().curve(d3.curveLinearClosed).radius(d => d * r).angle((d, i) => (i / n) * 2 * Math.PI);
 
-    // draw one polygon per format (if metrics available)
+    // draw one polygon per format (if metrics available and has matches)
     FORMATS.forEach(fmt => {
       const metrics = metricsByFormat[fmt.key];
-      if (!metrics) return;
+      // skip formats with no metrics or zero matches — don't draw misleading polygons
+      if (!metrics || !metrics.matches_count) return;
       const vals = [
         scales.bat_sr(metrics.batting_sr || 0),
         scales.bat_avg(metrics.batting_avg || 0),
@@ -365,15 +426,51 @@
         .style('pointer-events', 'none');
     });
 
-    // small value labels near each axis end showing raw metric — use 'combined' or show values of the first non-null format
-    const sampleFmt = Object.keys(metricsByFormat).map(k => metricsByFormat[k]).find(Boolean) || {};
+    // compute aggregated labels so radars always show numeric stats even when single formats are missing
+    function weightedAverage(arr) {
+      if (!arr || !arr.length) return null;
+      const totalW = arr.reduce((s, x) => s + (x.w || 1), 0);
+      if (!totalW) return null;
+      return arr.reduce((s, x) => s + (x.v * (x.w || 1)), 0) / totalW;
+    }
+
+    const combined = {
+      batting_sr: weightedAverage(collected.bat_sr),
+      batting_avg: weightedAverage(collected.bat_avg),
+      boundary_pct: weightedAverage(collected.boundary_pct),
+      bowling_econ: weightedAverage(collected.bowl_eco),
+      bowling_avg: weightedAverage(collected.bowl_avg),
+      bowling_sr: weightedAverage(collected.bowl_sr)
+    };
+
+    // If there are no matches across all formats, show a neutral placeholder and
+    // render labels as em-dashes to avoid implying numeric data.
+    if (totalMatchesAcross === 0) {
+      const placeholder = d3.range(n).map(i => 0.35);
+      const linePh = d3.lineRadial().curve(d3.curveLinearClosed).radius(d => d * r).angle((d, i) => (i / n) * 2 * Math.PI);
+      g.append("path").datum(placeholder).attr("d", linePh).attr("fill", "rgba(120,120,120,0.06)")
+        .attr("stroke", "rgba(120,120,120,0.24)");
+      const dashLabels = ['—','—','—','—','—','—'];
+      dashLabels.forEach((txt, i) => {
+        const ang = (i / n) * 2 * Math.PI - Math.PI/2;
+        g.append("text")
+          .attr("x", Math.cos(ang) * (r * 0.6))
+          .attr("y", Math.sin(ang) * (r * 0.6) + 4)
+          .attr("font-size", 11)
+          .attr("fill", "var(--muted)")
+          .attr("text-anchor", "middle")
+          .text(txt);
+      });
+      return;
+    }
+
     const labels = [
-      (sampleFmt.batting_sr != null) ? `${Math.round(sampleFmt.batting_sr)}` : '—',
-      (sampleFmt.batting_avg != null) ? `${(sampleFmt.batting_avg).toFixed(1)}` : '—',
-      (sampleFmt.boundary_pct != null) ? `${(sampleFmt.boundary_pct).toFixed(1)}%` : '—',
-      (sampleFmt.bowling_econ != null) ? `${(sampleFmt.bowling_econ).toFixed(2)}` : '—',
-      (sampleFmt.bowling_avg != null) ? `${(sampleFmt.bowling_avg).toFixed(1)}` : '—',
-      (sampleFmt.bowling_sr != null) ? `${Math.round(sampleFmt.bowling_sr)}` : '—'
+      (combined.batting_sr != null) ? `${Math.round(combined.batting_sr)}` : '—',
+      (combined.batting_avg != null) ? `${(combined.batting_avg).toFixed(1)}` : '—',
+      (combined.boundary_pct != null) ? `${(combined.boundary_pct).toFixed(1)}%` : '—',
+      (combined.bowling_econ != null) ? `${(combined.bowling_econ).toFixed(2)}` : '—',
+      (combined.bowling_avg != null) ? `${(combined.bowling_avg).toFixed(1)}` : '—',
+      (combined.bowling_sr != null) ? `${Math.round(combined.bowling_sr)}` : '—'
     ];
     labels.forEach((txt, i) => {
       const ang = (i / n) * 2 * Math.PI - Math.PI/2;
@@ -434,6 +531,11 @@
         if (wres && wres.byFormat) {
           const byFormat = wres.byFormat;
           svgEl._metrics = { byFormat }; svgEl.dataset.metrics = JSON.stringify({ byFormat });
+          // populate hidden developer diagnostics panel (toggle with Shift+click on title)
+          try {
+            const diag = panel.querySelector('.venue-diag');
+            if (diag) diag.textContent = JSON.stringify(svgEl._metrics, null, 2);
+          } catch (e) { /* ignore */ }
           try { _metricsCache.set(JSON.stringify({ id: datum.venue || datum.name || datum.venue_id || '', yr: yrRange, format }), svgEl._metrics); } catch(e) {}
           drawRadar(svgEl);
           // hide loading overlay
@@ -477,7 +579,7 @@
         { key: 'odi', label: 'ODI' },
         { key: 't20i', label: 'T20I' }
       ];
-      const byFormat = {};
+  const byFormat = {};
 
       // helper to compute metrics for a single format
       const formatPatterns = (fmtKey) => {
@@ -593,8 +695,14 @@
 
         // derived metrics
         const batting_sr = (bat && bat.balls) ? (100 * (bat.runs / bat.balls)) : null;
-        const batting_avg = (bat && bat.dismissals) ? (bat.runs / bat.dismissals) : (bat && bat.runs ? (bat.runs / Math.max(1, (innRows && innRows.length) || 1)) : null);
-        const boundary_pct = bat && bat.boundary_pct ? (+bat.boundary_pct) : null;
+        // when dismissals are unavailable, fall back to runs / total_innings (sum of counts),
+        // not the number of distinct innings_no rows (which was previously used and inflated averages)
+        const totalInningsCount = (innRows && innRows.length) ? innRows.reduce((s, r) => s + (r.cnt || 0), 0) : 0;
+        const batting_avg = (bat && bat.dismissals)
+          ? (bat.runs / bat.dismissals)
+          : (bat && bat.runs ? (bat.runs / Math.max(1, totalInningsCount || 1)) : null);
+        // boundary_pct in the source CSV is stored as a fraction (e.g. 0.04 for 4%), convert to percent
+        const boundary_pct = (bat && bat.boundary_pct != null) ? (+bat.boundary_pct * 100) : null;
         const bowling_econ = (bowl && bowl.balls) ? (bowl.runs_conceded / (bowl.balls / 6)) : null;
         const bowling_avg = (bowl && bowl.wickets) ? (bowl.runs_conceded / (bowl.wickets || 1)) : null;
         const bowling_sr = (bowl && bowl.wickets) ? (bowl.balls / (bowl.wickets || 1)) : null;
@@ -609,15 +717,31 @@
           innings_by_no: innRows || [],
           matches_count: matches.length,
           matches_with_result: matchesWithResult,
-          batting_first_win_pct: battingFirstPct
+          batting_first_win_pct: battingFirstPct,
+          // include raw query aggregates and the matching strategy used to aid debugging
+          _raw_batting: bat || {},
+          _raw_bowling: bowl || {},
+          _used_match_strategy: used
         };
       };
 
-      // compute for each format
-      FORMATS.forEach(f => { byFormat[f.key] = computeForFormat(f.key); });
+      // compute for each format (sequentially to avoid DB stress)
+      for (const f of FORMATS) {
+        try {
+          byFormat[f.key] = computeForFormat(f.key);
+        } catch (err) {
+          byFormat[f.key] = null;
+          console.warn('computeForFormat failed for', f.key, err);
+        }
+      }
 
       // attach metrics and render
       svgEl._metrics = { byFormat }; svgEl.dataset.metrics = JSON.stringify({ byFormat });
+      // populate hidden developer diagnostics panel (toggle with Shift+click on title)
+      try {
+        const diag = panel.querySelector('.venue-diag');
+        if (diag) diag.textContent = JSON.stringify(svgEl._metrics, null, 2);
+      } catch (e) { /* ignore */ }
   // store in cache (small LRU not implemented; clear if too large)
   try { _metricsCache.set(JSON.stringify({ id: datum.venue || datum.name || datum.venue_id || '', yr: yrRange, format }), svgEl._metrics); } catch(e) {}
       drawRadar(svgEl);

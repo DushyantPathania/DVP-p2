@@ -239,6 +239,26 @@ body.choro-on .country.has-venues { fill: inherit; }
 .lb-table tr:nth-child(1) td { font-weight: 700; color: #ffe082; }
 .lb-meta { color: var(--muted); font-size: 0.85rem; }
 
+/* Leaderboard format buttons (inside overlay). Mirror legend's visual style
+   and show a clear pressed/active state so users know which format is selected. */
+.lb-fmt-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.lb-fmt-btn[aria-pressed="true"] {
+  background: linear-gradient(90deg, rgba(255,138,0,0.12), rgba(45,212,191,0.06));
+  color: var(--text);
+  border-color: rgba(255,138,0,0.22);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.lb-fmt-btn:focus { outline: none; box-shadow: 0 0 0 3px rgba(255,138,0,0.12); }
+
 /* ===== Year Box (slider) ================================================= */
 .year-box{
   position: fixed;
@@ -458,11 +478,15 @@ body.landing #globe{
 }
 #globe,
 .year-box,
-.hamburger,
-#leaderboardOverlay,
-#backdrop {
+.hamburger {
   z-index: 1;
 }
+
+/* Ensure proper stacking: backdrop sits under the overlay so clicks inside the overlay
+   are not intercepted by the backdrop. Use high z-index values to avoid conflicts
+   with other fixed UI (legend/toggle). */
+#backdrop { z-index: 1201; }
+#leaderboardOverlay { z-index: 1203; }
 
 /* Ensure the SVG/globe never paints an opaque fill */
 #globe, #globe svg { background: transparent; }

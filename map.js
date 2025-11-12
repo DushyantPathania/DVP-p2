@@ -692,22 +692,222 @@
   backdrop.addEventListener("click", closeOverlay);
   window.addEventListener("keydown", (e)=>{ if(e.key==="Escape" && !overlay.hidden) closeOverlay(); });
 
+  // Prevent clicks inside the overlay from bubbling to the backdrop (which would close it)
+  if (overlay) overlay.addEventListener('click', (e) => { e.stopPropagation(); });
+
   tabBtns.forEach(btn => btn.addEventListener("click", () => setActiveTab(btn.dataset.kind)));
   function setActiveTab(kind){
     tabBtns.forEach(b => { const on=b.dataset.kind===kind; b.classList.toggle("active", on); b.setAttribute("aria-selected", on ? "true":"false"); });
     renderLeaderboard(kind);
   }
-  function renderLeaderboard(kind="batting"){
-    const rows = (kind==="batting" ? battingData : bowlingData).slice()
-      .sort((a,b) => (kind==="batting" ? d3.descending(a.runs,b.runs) : d3.descending(a.wkts,b.wkts)));
-    const head = (kind==="batting")
-      ? `<tr><th>#</th><th>Player</th><th>Team</th><th>Runs</th><th>SR</th><th>Avg</th></tr>`
-      : `<tr><th>#</th><th>Player</th><th>Team</th><th>Wkts</th><th>Eco</th><th>Avg</th></tr>`;
-    const body = rows.map((r,i)=> (kind==="batting")
-      ? `<tr><td>${i+1}</td><td>${r.player}</td><td>${r.team}</td><td>${r.runs}</td><td>${r.sr}</td><td>${r.avg}</td></tr>`
-      : `<tr><td>${i+1}</td><td>${r.player}</td><td>${r.team}</td><td>${r.wkts}</td><td>${r.eco}</td><td>${r.avg}</td></tr>`).join("");
-    tabPanel.innerHTML = `<table class="lb-table" aria-describedby="lbMeta"><thead>${head}</thead><tbody>${body}</tbody></table>
-    <p id="lbMeta" class="lb-meta">Demo data — replace in <code>map.js</code> if needed.</p>`;
+
+  // Normalize best field like "4/25" or numeric best; used by comparator
+  function parseBestField(v){
+    if (v == null) return { wk:0, runs:0 };
+    if (typeof v === 'number') return { wk: +v, runs: 0 };
+    const s = String(v).trim(); if (!s) return { wk:0, runs:0 };
+    const m = s.match(/(\d+)\s*\/?\s*(\d*)/);
+    if (!m) return { wk:0, runs:0 };
+    return { wk: +(m[1]||0), runs: +(m[2]||0) };
+  }
+
+  // comparator for table rows; handles numeric columns and special 'best' semantics
+  function makeComparator(sortState){
+    return function(a,b){
+      const col = sortState.col;
+      if (!col) return 0;
+      if (col === 'best'){
+        const pa = parseBestField(a.best), pb = parseBestField(b.best);
+        if (pa.wk !== pb.wk) return (sortState.dir==='desc') ? d3.descending(pa.wk,pb.wk) : d3.ascending(pa.wk,pb.wk);
+        return (sortState.dir==='desc') ? d3.ascending(pa.runs,pb.runs) : d3.descending(pa.runs,pb.runs);
+      }
+      const av = a[col], bv = b[col];
+      if (av == null || bv == null) return 0;
+      return (sortState.dir==='desc') ? d3.descending(av,bv) : d3.ascending(av,bv);
+    };
+  }
+
+  // Attempt to build batting leaderboard from DB; falls back to demo
+  async function getBattingLeaderboard(minYear, maxYear, format='all', limit=50){
+    try{
+      // join matches to filter by match date (year) and prefer format from matches when present
+      const fmtCond = (format && format !== 'all') ? `AND LOWER(COALESCE(m.format, bi.format, '')) LIKE ?` : '';
+      const params = [minYear, maxYear]; if (fmtCond) params.push(`%${format}%`);
+      const rows = await DB.queryAll(`
+        SELECT bi.batter AS player, bi.team AS team,
+               COUNT(DISTINCT bi.match_id) AS matches,
+               SUM(CAST(bi.runs AS INT)) AS runs,
+               SUM(CAST(bi.balls AS INT)) AS balls,
+               SUM(CASE WHEN COALESCE(bi.out,'')<>'' THEN 1 ELSE 0 END) AS dismissals,
+               SUM(CASE WHEN CAST(bi.runs AS INT) >= 100 THEN 1 ELSE 0 END) AS hundreds,
+               SUM(CASE WHEN CAST(bi.runs AS INT) BETWEEN 50 AND 99 THEN 1 ELSE 0 END) AS fifties,
+               MAX(CAST(bi.runs AS INT)) AS best
+        FROM batting_innings bi
+        LEFT JOIN matches m ON bi.match_id = m.match_id
+        WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? ${fmtCond}
+        GROUP BY bi.batter, bi.team
+        ORDER BY runs DESC
+        LIMIT ${limit}
+      `, params);
+      if (!rows) return null;
+      return rows.map(r => ({
+        player: r.player,
+        team: r.team,
+        matches: +r.matches||0,
+        runs: +r.runs||0,
+        balls: +r.balls||0,
+        sr: r.balls ? +(100*(r.runs/r.balls)).toFixed(1) : 0,
+        avg: r.dismissals ? +(r.runs / r.dismissals).toFixed(2) : (r.matches ? +(r.runs / r.matches).toFixed(2) : 0),
+        hundreds: +r.hundreds||0,
+        fifties: +r.fifties||0,
+        best: r.best
+      }));
+    }catch(e){ console.warn('batting leaderboard SQL failed', e); return null; }
+  }
+
+  // Attempt to build bowling leaderboard from DB; falls back to demo
+  async function getBowlingLeaderboard(minYear, maxYear, format='all', limit=50){
+    try{
+      // join matches for date filtering and format resolution
+      const fmtCond = (format && format !== 'all') ? `AND LOWER(COALESCE(m.format, bi.format, '')) LIKE ?` : '';
+      const params = [minYear, maxYear]; if (fmtCond) params.push(`%${format}%`);
+      const rows = await DB.queryAll(`
+        SELECT bi.bowler AS player, bi.team AS team,
+               COUNT(DISTINCT bi.match_id) AS matches,
+               SUM(CAST(bi.wickets AS INT)) AS wkts,
+               SUM(CAST(bi.runs_conceded AS INT)) AS runs_conceded,
+               SUM(CAST(bi.legal_balls AS INT)) AS balls,
+               SUM(CASE WHEN CAST(bi.wickets AS INT) >= 5 THEN 1 ELSE 0 END) AS five_wkts,
+               MAX(CAST(bi.wickets AS INT)) AS best_wkts
+        FROM bowling_innings bi
+        LEFT JOIN matches m ON bi.match_id = m.match_id
+        WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? ${fmtCond}
+        GROUP BY bi.bowler, bi.team
+        ORDER BY wkts DESC
+        LIMIT ${limit}
+      `, params);
+      if (!rows) return null;
+      // For each row, try to fetch the minimal runs_conceded for the best_wkts to present best as W/R
+      const out = [];
+      for (const r of rows){
+        let bestRuns = 0;
+        try{
+          let br;
+          if (fmtCond) {
+            br = await DB.queryAll(
+              `SELECT MIN(CAST(bi.runs_conceded AS INT)) AS runs FROM bowling_innings bi LEFT JOIN matches m ON bi.match_id = m.match_id WHERE LOWER(COALESCE(m.format, bi.format, '')) LIKE ? AND bi.bowler = ? AND CAST(bi.wickets AS INT) = ? LIMIT 1`,
+              [`%${format}%`, r.player, r.best_wkts]
+            );
+          } else {
+            br = await DB.queryAll(
+              `SELECT MIN(CAST(bi.runs_conceded AS INT)) AS runs FROM bowling_innings bi WHERE bi.bowler = ? AND CAST(bi.wickets AS INT) = ? LIMIT 1`,
+              [r.player, r.best_wkts]
+            );
+          }
+          if (br && br[0] && br[0].runs != null) bestRuns = +br[0].runs;
+        }catch(e) { /* ignore per-player best fetch errors */ }
+        out.push({
+          player: r.player,
+          team: r.team,
+          matches: +r.matches||0,
+          wkts: +r.wkts||0,
+          runs_conceded: +r.runs_conceded||0,
+          balls: +r.balls||0,
+          eco: r.balls ? +((r.runs_conceded/(r.balls/6))).toFixed(2) : 0,
+          avg: r.wkts ? +(r.runs_conceded / r.wkts).toFixed(2) : 0,
+          five_wkts: +r.five_wkts||0,
+          best: `${r.best_wkts||0}/${bestRuns||0}`
+        });
+      }
+      return out;
+    }catch(e){ console.warn('bowling leaderboard SQL failed', e); return null; }
+  }
+
+  // Render leaderboard into overlay; supports format filter and sorting via delegated header click
+  async function renderLeaderboard(kind = "batting") {
+    tabPanel.innerHTML = `<div class="lb-loading">Loading...</div>`;
+    let rows = [];
+    const fmtDefault = (typeof selectedFormat === 'string' ? selectedFormat : 'all') || 'all';
+    let fmt = fmtDefault;
+
+    // initial sort state: batting -> runs, bowling -> wkts
+    const sortState = { col: (kind === 'batting' ? 'runs' : (kind === 'bowling' ? 'wkts' : null)), dir: 'desc' };
+
+    async function fetchRows() {
+      try {
+        const { min, max } = yearRange || { min: YEAR_MIN, max: YEAR_MAX };
+        if (kind === 'batting') rows = await getBattingLeaderboard(min, max, fmt) || battingData.slice();
+        else rows = await getBowlingLeaderboard(min, max, fmt) || bowlingData.slice();
+      } catch (e) { console.warn('leaderboard query failed', e); rows = (kind === 'batting' ? battingData.slice() : bowlingData.slice()); }
+      // normalize fallback rows to expected fields
+      rows = rows.map(r => ({
+        matches: r.matches || 0,
+        runs: r.runs || 0,
+        balls: r.balls || 0,
+        sr: r.sr || 0,
+        avg: r.avg || 0,
+        hundreds: r.hundreds || 0,
+        fifties: r.fifties || 0,
+        wkts: r.wkts || 0,
+        eco: r.eco || 0,
+        five_wkts: r.five_wkts || 0,
+        best: r.best || '',
+        player: r.player || '',
+        team: r.team || ''
+      }));
+    }
+
+    function buildControls() {
+      const fmtHtml = `<div class="lb-controls"><div class="fmt-filter" role="tablist" aria-label="Format filter">
+        <button class="lb-fmt-btn" data-format="all" aria-pressed="${fmt==='all'}">All</button>
+        <button class="lb-fmt-btn" data-format="odi" aria-pressed="${fmt==='odi'}">ODI</button>
+        <button class="lb-fmt-btn" data-format="t20" aria-pressed="${fmt==='t20'}">T20</button>
+        <button class="lb-fmt-btn" data-format="test" aria-pressed="${fmt==='test'}">Test</button>
+      </div></div>`;
+      tabPanel.innerHTML = fmtHtml + `<div class="lb-wrap">${tabPanel.innerHTML}</div>`;
+      const btns = tabPanel.querySelectorAll('.lb-fmt-btn');
+      btns.forEach(b => b.addEventListener('click', async () => {
+        const f = b.dataset.format || 'all';
+        fmt = f; btns.forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+        await fetchRows(); buildTable();
+      }));
+    }
+
+    function buildTable() {
+      const head = (kind === 'batting')
+        ? `<tr><th>#</th><th>Player</th><th>Team</th><th data-col="matches" class="sortable">Matches</th><th data-col="runs" class="sortable">Runs</th><th data-col="sr" class="sortable">SR</th><th data-col="avg" class="sortable">Avg</th><th data-col="hundreds" class="sortable">100s</th><th data-col="fifties" class="sortable">50s</th><th data-col="best" class="sortable">Best</th></tr>`
+        : `<tr><th>#</th><th>Player</th><th>Team</th><th data-col="matches" class="sortable">Matches</th><th data-col="wkts" class="sortable">Wkts</th><th data-col="eco" class="sortable">Eco</th><th data-col="avg" class="sortable">Avg</th><th data-col="five_wkts" class="sortable">5W</th><th data-col="best" class="sortable">Best</th></tr>`;
+
+      const comp = makeComparator(sortState);
+      const sorted = rows.slice().sort(comp).slice(0, 10);
+      const body = sorted.map((r, i) => {
+        if (kind === 'batting') return `<tr><td>${i+1}</td><td>${r.player}</td><td>${r.team||''}</td><td>${r.matches}</td><td>${r.runs}</td><td>${r.sr}</td><td>${r.avg}</td><td>${r.hundreds}</td><td>${r.fifties}</td><td>${r.best||''}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${r.player}</td><td>${r.team||''}</td><td>${r.matches}</td><td>${r.wkts}</td><td>${r.eco}</td><td>${r.avg}</td><td>${r.five_wkts}</td><td>${r.best||''}</td></tr>`;
+      }).join('');
+
+      const tableHtml = `<table class="lb-table" aria-describedby="lbMeta"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+      const meta = `<p id="lbMeta" class="lb-meta">Top 10 — ${kind} — format: ${fmt.toUpperCase()}</p>`;
+      tabPanel.querySelector('.lb-wrap')?.remove();
+      tabPanel.insertAdjacentHTML('beforeend', `<div class="lb-wrap">${tableHtml}${meta}</div>`);
+
+      const thead = tabPanel.querySelector('thead');
+      if (thead) {
+        thead.style.userSelect = 'none';
+        const newThead = thead.cloneNode(true);
+        thead.parentNode.replaceChild(newThead, thead);
+        newThead.addEventListener('click', (ev) => {
+          const th = ev.target.closest('th'); if (!th) return;
+          const col = th.dataset.col; if (!col) return;
+          if (sortState.col === col) sortState.dir = (sortState.dir === 'desc' ? 'asc' : 'desc');
+          else { sortState.col = col; sortState.dir = 'desc'; }
+          buildTable();
+        });
+      }
+    }
+
+    await fetchRows();
+    buildControls();
+    buildTable();
   }
 
   /* ----------------------- Country Focus & Venue Load ---------------------- */
@@ -722,72 +922,6 @@
       addVenues(rows); drawVenues();
     } catch(e){ console.warn("Failed loading venues for", name, e); }
     finally { toastHide(); }
-  }
-  async function focusGlobeOn(feature){
-    const c = d3.geoCentroid(feature);
-    const r0 = projection.rotate(); const r1 = [-c[0], -c[1], r0[2]];
-    const s0 = globeZoomK; const s1 = Math.max(1.3, Math.min(2.2, s0*1.5));
-    await new Promise(res => {
-      d3.transition().duration(900).tween("rotate", () => {
-        const ir = d3.interpolate(r0, r1); const iz = d3.interpolate(s0, s1);
-        return t => { projection.rotate(ir(t)); globeZoomK = iz(t); projection.scale(baseScale*globeZoomK); redrawAll(); if (t===1) res(); };
-      });
-    });
-  }
-  async function focusMapOn(feature){
-    const rect = container.getBoundingClientRect();
-    const width = rect.width, height = rect.height;
-    const b = path.bounds(feature), dx = b[1][0]-b[0][0], dy = b[1][1]-b[0][1];
-    const x = (b[0][0]+b[1][0])/2, y = (b[0][1]+b[1][1])/2;
-    const m = 0.85, s = Math.max(1, Math.min(12, m/Math.max(dx/width, dy/height)));
-    const tx = width/2 - s*x, ty = height/2 - s*y;
-    await new Promise(res => { svg.transition().duration(800).call(zoomMap.transform, d3.zoomIdentity.translate(tx,ty).scale(s)).on("end", res); });
-  }
-
-  /* ------------------------------ DB Helpers ------------------------------- */
-  async function loadVenueCountries(){
-    const { countryCol, iso3, iso2 } = await getVenueSchema();
-    if (countryCol) {
-      const rows = await DB.queryAll(`SELECT DISTINCT ${countryCol} AS val FROM venues WHERE ${countryCol} IS NOT NULL AND TRIM(${countryCol}) <> ''`);
-      return new Set(rows.map(r => canonicalMapName(r.val)));
-    } else {
-      const iso3Map = new Map(Object.entries({ AUS:"australia", IND:"india", PAK:"pakistan", NZL:"new zealand", ZAF:"south africa", LKA:"sri lanka", BGD:"bangladesh", AFG:"afghanistan", GBR:"united kingdom", ARE:"united arab emirates" }));
-      const iso2Map = new Map(Object.entries({ AU:"australia", IN:"india", PK:"pakistan", NZ:"new zealand", ZA:"south africa", LK:"sri lanka", BD:"bangladesh", AF:"afghanistan", GB:"united kingdom", AE:"united arab emirates" }));
-      const set = new Set();
-      if (iso3) {
-        const rows = await DB.queryAll(`SELECT DISTINCT ${iso3} AS val FROM venues WHERE ${iso3} IS NOT NULL AND TRIM(${iso3}) <> ''`);
-        rows.forEach(r => { const c = iso3Map.get(String(r.val).toUpperCase()); if (c) set.add(c); });
-      } else if (iso2) {
-        const rows = await DB.queryAll(`SELECT DISTINCT ${iso2} AS val FROM venues WHERE ${iso2} IS NOT NULL AND TRIM(${iso2}) <> ''`);
-        rows.forEach(r => { const c = iso2Map.get(String(r.val).toUpperCase()); if (c) set.add(c); });
-      }
-      return set;
-    }
-  }
-  async function loadVenuesForCountry(canonName){
-    const { countryCol, iso3, iso2, lonCol, latCol } = await getVenueSchema();
-    let whereSql = ""; let params = [];
-    if (countryCol) {
-      const candidates = [canonName];
-      if (canonName === "united kingdom") candidates.push("england");
-      if (canonName === "united arab emirates") candidates.push("uae");
-      whereSql = `LOWER(${countryCol}) IN (${candidates.map(()=>"?").join(",")})`;
-      params = candidates.map(s => s.toLowerCase());
-    } else if (iso3 || iso2) {
-      const nameToIso3 = new Map(Object.entries({ "australia":"AUS","india":"IND","pakistan":"PAK","new zealand":"NZL","south africa":"ZAF","sri lanka":"LKA","bangladesh":"BGD","afghanistan":"AFG","united kingdom":"GBR","united arab emirates":"ARE" }));
-      const nameToIso2 = new Map(Object.entries({ "australia":"AU","india":"IN","pakistan":"PK","new zealand":"NZ","south africa":"ZA","sri lanka":"LK","bangladesh":"BD","afghanistan":"AF","united kingdom":"GB","united arab emirates":"AE" }));
-      if (iso3 && nameToIso3.get(canonName)) { whereSql = `UPPER(${iso3}) = ?`; params=[nameToIso3.get(canonName)]; }
-      else if (iso2 && nameToIso2.get(canonName)) { whereSql = `UPPER(${iso2}) = ?`; params=[nameToIso2.get(canonName)]; }
-      else whereSql = "1=0";
-    } else { whereSql = "1=0"; }
-
-    const rows = await DB.queryAll(`SELECT * FROM venues WHERE ${whereSql}`, params);
-    return rows.map(r => {
-      const out = { ...r };
-      out.longitude = pickCoord(r, [lonCol, "longitude","lon","lng","long","x"]);
-      out.latitude  = pickCoord(r, [latCol, "latitude","lat","y"]);
-      return out;
-    }).filter(r => isFinite(+r.longitude) && isFinite(+r.latitude));
   }
   function pickCoord(row, keys){
     for (const k of keys) {
@@ -843,6 +977,14 @@
     const { min, max } = ev.detail || {};
     console.info("[SLIDER] range:", min, max);
     await computeChoropleth(min, max);
+    // If the leaderboard overlay is open, refresh it so it respects the new year range
+    try {
+      if (overlay && !overlay.hidden) {
+        const active = tabBtns.find(b => b.classList.contains('active'))?.dataset.kind || 'batting';
+        // re-render the active leaderboard tab (debounce lightly by next tick)
+        setTimeout(() => { renderLeaderboard(active); }, 20);
+      }
+    } catch (e) { console.warn('yearrange:change re-render failed', e); }
   });
 
   // initial choropleth + spikes

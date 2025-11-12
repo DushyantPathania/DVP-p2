@@ -133,7 +133,7 @@ body.choro-on .country.has-venues { fill: inherit; }
 /* Flow arcs (globe) */
 .flow {
   fill: none;
-  stroke: #2b6fb3;
+  stroke: #39d353;
   stroke-opacity: 0.9;
   stroke-linecap: round;
   transition: stroke-width 120ms ease, opacity 120ms ease;

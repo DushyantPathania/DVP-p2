@@ -286,6 +286,8 @@
   };
   // spike color used for vertical 'spike' lines and legend — use a bright red for visibility
   const SPIKE_COLOR = '#ff0000';
+  // color to use for flow arcs when in 2D map mode (bright green)
+  const FLOW_MAP_COLOR = '#39d353';
   let selectedFormat = 'all';
   // expose selected format globally so other modules (venue popup) can read it
   window.selectedFormat = selectedFormat;
@@ -992,9 +994,9 @@
         for (let i=0;i<=N;i++){ coords.push(interp(i/N)); }
         const geo = { type: 'LineString', coordinates: coords };
         d3.select(this).attr('d', path(geo)).attr('stroke-width', Math.max(0.6, flowWidthScale(d.matches)));
-  // color by origin
-  const col = countryColors.get(d.originKey) || countryColorScale(d.originKey);
-  d3.select(this).attr('stroke', col);
+  // color by origin (use same per-origin color on both globe and flat map)
+  const colBase = countryColors.get(d.originKey) || countryColorScale(d.originKey);
+  d3.select(this).attr('stroke', colBase);
       }catch(e){ d3.select(this).attr('d', null); }
     });
     console.info('[FLOWS] drawFlowArcs created', data.length || 0, 'arcs');
@@ -1026,9 +1028,9 @@
         for (let i=0;i<=N;i++) coords.push(interp(i/N));
         const geo = { type: 'LineString', coordinates: coords };
         d3.select(this).attr('d', path(geo)).attr('stroke-width', Math.max(0.6, flowWidthScale(d.matches)) * (mode==='globe' ? globeZoomK : 1));
-  // ensure color stays in sync (in case selection or colors changed)
-  const col = countryColors.get(d.originKey) || countryColorScale(d.originKey);
-  d3.select(this).attr('stroke', col);
+  // ensure color stays in sync (always use per-origin color)
+  const colBase = countryColors.get(d.originKey) || countryColorScale(d.originKey);
+  d3.select(this).attr('stroke', colBase);
       }catch(e){ d3.select(this).attr('d', null); }
     });
   }

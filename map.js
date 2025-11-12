@@ -157,6 +157,8 @@
     test:["#fff7e6", "#f4b942", "#8b4513"]   // pale -> ochre -> brown
   };
   let selectedFormat = 'all';
+  // expose selected format globally so other modules (venue popup) can read it
+  window.selectedFormat = selectedFormat;
   const colorScales = {
     all: d3.scaleLinear().domain([0,0.5,1]).range(PALETTES.all),
     odi: d3.scaleLinear().domain([0,0.5,1]).range(PALETTES.odi),
@@ -580,6 +582,9 @@
     btns.forEach(b => b.addEventListener('click', () => {
       const fmt = b.dataset.format || 'all';
       selectedFormat = fmt;
+      // publish globally for other UI (venue popup) to react
+      window.selectedFormat = selectedFormat;
+      window.dispatchEvent(new CustomEvent('format:change', { detail: { format: selectedFormat } }));
       btns.forEach(x => x.setAttribute('aria-selected', x === b ? 'true' : 'false'));
       // update legend gradient
       const grad = document.querySelector('.legend-gradbar');

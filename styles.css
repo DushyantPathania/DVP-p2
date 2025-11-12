@@ -206,6 +206,10 @@ body.choro-on .country.has-venues { fill: inherit; }
   opacity: 0; transition: opacity 180ms ease; }
 .backdrop.open { opacity: 1; }
 
+/* When focusing a single venue, use a blue scrim to tint the map/UI. The
+   scrim sits under the year slider so the slider remains interactive. */
+.backdrop.venue-blue { background: rgba(3,36,102,0.65); mix-blend-mode: screen; }
+
 .overlay {
   position: fixed; top: 50%; left: 50%;
   width: 89vw; height: 89vh; max-width: 1400px; max-height: 92vh;
@@ -493,7 +497,7 @@ body.landing #globe{
   are not intercepted by the backdrop. Place the year slider above the backdrop so
   it remains interactive, but keep the overlay above the slider. */
 /* backdrop: below most UI */
-#backdrop { z-index: 1000; }
+#backdrop { z-index: 1200; }
 /* legend and overlay keep their high values; overlay must remain above slider */
 #leaderboardOverlay { z-index: 1203; }
 
@@ -509,3 +513,52 @@ body { background: transparent; }
 
 /* Placement + sizing so it never inherits hero text size/baseline */
 /* legacy ui-toggle reset removed (not used) */
+
+/* ===== Venue window (popup) ============================================ */
+#venue-window{
+  position: fixed; /* ensure placeAtDatum left/top work */
+  z-index: 1310;
+  display: none;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  width: min(420px, calc(100vw - 40px));
+  max-width: 420px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  font-size: 14px;
+}
+
+#venue-window .venue-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.04); }
+#venue-window .venue-title{ margin:0; font-size:1.05rem; color:var(--text); }
+#venue-window .venue-badge{ font-size:0.85rem; color:var(--muted); background: rgba(255,255,255,0.03); padding:4px 8px; border-radius:8px; }
+#venue-window .venue-close{ background: transparent; color: var(--text); border: 1px solid var(--panel-border); padding:4px 8px; border-radius:8px; cursor:pointer; }
+#venue-window .venue-content{ display:flex; flex-direction:column; gap:8px; padding-top:10px; }
+#venue-window .venue-card{ background: rgba(255,255,255,0.02); border-radius:8px; padding:8px; }
+
+/* Venue popup enhancements */
+.venue-legend { display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:10px; }
+.venue-legend-item { background: transparent; border: none; color: var(--text); cursor: pointer; padding:6px; border-radius:8px; display:inline-flex; align-items:center; gap:8px; }
+.venue-legend-item[aria-pressed="false"] { opacity: 0.45; }
+.venue-legend-item .legend-dot { box-shadow: 0 6px 18px rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.04); }
+
+/* Radar polygon styles */
+.radar-poly { transition: opacity 160ms ease, transform 180ms ease; }
+.radar-poly-test { fill: #e6cf9a; stroke: #e6cf9a; }
+.radar-poly-odi  { fill: #2dd4bf; stroke: #2dd4bf; }
+.radar-poly-t20i { fill: #a78bfa; stroke: #a78bfa; }
+
+/* When format toggle is off, dim that polygon strongly */
+.fmt-hidden-test .radar-poly-test,
+.fmt-hidden-odi  .radar-poly-odi,
+.fmt-hidden-t20i .radar-poly-t20i { opacity: 0.06 !important; }
+
+/* Fancy info card */
+.venue-info { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:12px; border-radius:10px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
+.venue-info .v-country { font-weight:700; color:var(--text); }
+.venue-info .v-city { color:var(--muted); }
+.venue-info .v-aka { font-size:0.92rem; color:var(--muted); }
+

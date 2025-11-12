@@ -200,6 +200,8 @@
 
   // Transient venue-loading dialog shown when a venue icon is clicked until the
   // VenueWindow actually opens (fires `venuewindow:open`). Idempotent helpers.
+  // keep state so we can reliably clear timeouts / listeners
+  let _venueLoadingState = { timeoutId: null, onOpen: null };
   function showVenueLoading(msg = 'Loading venue details...'){
     let el = document.getElementById('venue-loading-dialog');
     if (!el) {
@@ -231,8 +233,23 @@
       el.style.display = 'flex';
       const inner = el.firstChild; if (inner) inner.textContent = msg;
     }
+    // clear any previous state
+    if (_venueLoadingState.timeoutId) { clearTimeout(_venueLoadingState.timeoutId); _venueLoadingState.timeoutId = null; }
+    if (_venueLoadingState.onOpen) { window.removeEventListener('venuewindow:open', _venueLoadingState.onOpen); _venueLoadingState.onOpen = null; }
+    // auto-hide when venue window opens
+    const onOpen = () => { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); _venueLoadingState.onOpen = null; };
+    _venueLoadingState.onOpen = onOpen;
+    window.addEventListener('venuewindow:open', onOpen);
+    // fallback timeout to avoid stuck overlay
+    _venueLoadingState.timeoutId = setTimeout(() => { hideVenueLoading(); _venueLoadingState.timeoutId = null; }, 10000);
   }
-  function hideVenueLoading(){ const el = document.getElementById('venue-loading-dialog'); if (el) el.style.display = 'none'; }
+  function hideVenueLoading(){ const el = document.getElementById('venue-loading-dialog'); if (el) el.style.display = 'none';
+    // clear any pending timeout/listener
+    try {
+      if (_venueLoadingState.timeoutId) { clearTimeout(_venueLoadingState.timeoutId); _venueLoadingState.timeoutId = null; }
+      if (_venueLoadingState.onOpen) { window.removeEventListener('venuewindow:open', _venueLoadingState.onOpen); _venueLoadingState.onOpen = null; }
+    } catch(e) { /* ignore */ }
+  }
 
   /* ------------------------- Schema Introspection -------------------------- */
   let schemaCache = null;
@@ -286,17 +303,18 @@
       .attr("width", ICON_BASE)
       .attr("height", ICON_BASE)
       .attr("opacity", 0.95)
+      // show loader immediately on pointerdown so users get instant feedback
+      .on("pointerdown", (event, d) => {
+        try { event.stopPropagation(); } catch(e){}
+        stopSpin();
+        // show transient loader immediately; global helper manages timeout and cleanup
+        showVenueLoading('Loading venue details...');
+      })
       .on("click", (event, d) => {
         event.stopPropagation();
         stopSpin();
-        // show transient full-screen loader until the venue popup opens
-        showVenueLoading('Loading venue details...');
-        const onOpen = () => { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); };
-        window.addEventListener('venuewindow:open', onOpen);
-        // fallback: ensure loader is hidden after 10s to avoid stuck overlay
-        const to = setTimeout(() => { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); clearTimeout(to); }, 10000);
         // open the venue popup (it will dispatch 'venuewindow:open' when ready)
-        try { VenueWindow.open(d); } catch (e) { hideVenueLoading(); window.removeEventListener('venuewindow:open', onOpen); console.warn('VenueWindow.open failed', e); }
+        try { VenueWindow.open(d); } catch (e) { hideVenueLoading(); console.warn('VenueWindow.open failed', e); }
       });
 
     enter.append("title").text(d => d.venue || d.name || "Venue");
@@ -1074,9 +1092,9 @@
   // build legend UI (D3) and wire format buttons
   createLegendUI();
 
-  // pause/resume spin on popup
-  window.addEventListener("venuewindow:open",  () => stopSpin());
-  window.addEventListener("venuewindow:close", () => { if (mode==="globe" && !countryFocused) startSpin(); });
+  // pause/resume spin on popup and ensure transient loader is hidden when popup state changes
+  window.addEventListener("venuewindow:open",  () => { hideVenueLoading(); stopSpin(); });
+  window.addEventListener("venuewindow:close", () => { hideVenueLoading(); if (mode==="globe" && !countryFocused) startSpin(); });
 
   // stop map gestures when using the slider
   ["pointerdown","mousedown","touchstart","wheel"].forEach(ev =>

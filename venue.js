@@ -792,7 +792,32 @@
     const city = panel.querySelector(".v-city"); if (city) city.textContent = d.city ?? "—";
     const aka  = panel.querySelector(".v-aka");  if (aka)  aka.textContent  = d.names ?? "—";
 
-  const rsvg = panel.querySelector('svg[data-role="radar"]');
+    const rsvg = panel.querySelector('svg[data-role="radar"]');
+    // center & show the panel immediately so the UI is responsive. Dispatch the
+    // global `venuewindow:open` event before kicking off the potentially long
+    // fetch to ensure map-level transient loaders hide promptly.
+    try {
+      panel.style.left = '50%';
+      panel.style.top = '50%';
+      panel.style.transform = 'translate(-50%, -50%)';
+      panel.style.display = "block";
+      // show blue backdrop (but keep year slider interactive above it)
+      const backdropEl = document.getElementById('backdrop');
+      if (backdropEl) {
+        backdropEl.hidden = false;
+        // small timeout to allow CSS transition
+        setTimeout(() => backdropEl.classList.add('open','venue-blue'), 10);
+      }
+      // indicate panel is centered so reposition won't attempt to anchor to map
+      panel.dataset.centered = 'true';
+      isOpen = true;
+      // dispatch open event early so global transient loader (map-level) hides
+      // even if subsequent data fetching faults or takes long.
+      window.dispatchEvent(new CustomEvent("venuewindow:open"));
+    } catch (e) {
+      console.warn('VenueWindow.open: UI show failed', e);
+    }
+
     if (rsvg) {
       // parse year badge for current range
       let yr = badgeEl?.textContent || "2000–2025";
@@ -803,29 +828,23 @@
       }catch(e){}
       const fmt = window.selectedFormat || 'all';
       // fetch DB metrics and render radar
-      // show immediate loading overlay while fetching
+      // show immediate per-panel loading overlay while fetching
       const radarWrap = panel.querySelector('div > svg[data-role="radar"]')?.parentNode || null;
       const loadingOverlay = radarWrap ? radarWrap.querySelector('.venue-loading') : null;
       if (loadingOverlay) loadingOverlay.style.display = 'flex';
-      fetchAndRender(d, { min, max }, fmt).finally(() => { if (loadingOverlay) loadingOverlay.style.display = 'none'; });
-    }
 
-    // center the panel on screen for focused venue view
-    panel.style.left = '50%';
-    panel.style.top = '50%';
-    panel.style.transform = 'translate(-50%, -50%)';
-    panel.style.display = "block";
-    // show blue backdrop (but keep year slider interactive above it)
-    const backdropEl = document.getElementById('backdrop');
-    if (backdropEl) {
-      backdropEl.hidden = false;
-      // small timeout to allow CSS transition
-      setTimeout(() => backdropEl.classList.add('open','venue-blue'), 10);
+      // Run fetchAndRender asynchronously; ensure we always hide the per-panel
+      // overlay and log any error so the UI doesn't remain in a loading state.
+      (async () => {
+        try {
+          await fetchAndRender(d, { min, max }, fmt);
+        } catch (err) {
+          console.warn('fetchAndRender failed in VenueWindow.open', err);
+        } finally {
+          try { if (loadingOverlay) loadingOverlay.style.display = 'none'; } catch(e){}
+        }
+      })();
     }
-    // indicate panel is centered so reposition won't attempt to anchor to map
-    panel.dataset.centered = 'true';
-    isOpen = true;
-    window.dispatchEvent(new CustomEvent("venuewindow:open"));
   }
 
   function close(){

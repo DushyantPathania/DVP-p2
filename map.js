@@ -1913,19 +1913,40 @@
 
   // slider init & wiring
   initYearBox(false);
-  window.addEventListener("yearrange:change", async (ev) => {
+  // Debounced handler for year-range changes: avoid running expensive recomputation on every
+  // slider move (which can cause visible jank). Wait for a short pause after the user stops
+  // sliding before triggering the heavy work (choropleth + flows). Also update the local
+  // `yearRange` immediately so other UI elements remain synchronized.
+  let _yearRangeDebounce = null;
+  const YEAR_DEBOUNCE_MS = 300;
+  window.addEventListener("yearrange:change", (ev) => {
     const { min, max } = ev.detail || {};
-    console.info("[SLIDER] range:", min, max);
-    await computeChoropleth(min, max);
-    try { await computeFlows(min, max); drawFlowArcs(); drawBubbles(); } catch(e){ /* ignore */ }
-    // If the leaderboard overlay is open, refresh it so it respects the new year range
-    try {
-      if (overlay && !overlay.hidden) {
-        const active = tabBtns.find(b => b.classList.contains('active'))?.dataset.kind || 'batting';
-        // re-render the active leaderboard tab (debounce lightly by next tick)
-        setTimeout(() => { renderLeaderboard(active); }, 20);
-      }
-    } catch (e) { console.warn('yearrange:change re-render failed', e); }
+    console.info("[SLIDER] requested range:", min, max);
+
+    // Keep the in-memory range up-to-date for other UI pieces (fast)
+    yearRange = { min, max };
+    try { if (yearBoxValue) yearBoxValue.textContent = `Years ${min}–${max}`; } catch(e){}
+
+    // Debounce expensive work
+    if (_yearRangeDebounce) clearTimeout(_yearRangeDebounce);
+    _yearRangeDebounce = setTimeout(async () => {
+      _yearRangeDebounce = null;
+      try {
+        // Optionally show a small loading toast while recomputing
+        try { toast('Updating visuals…'); } catch(e){}
+        await computeChoropleth(min, max);
+        try { await computeFlows(min, max); drawFlowArcs(); drawBubbles(); updateBubbleLegend(); } catch(e){ console.warn('flow/bubble recompute failed', e); }
+
+        // If the leaderboard overlay is open, refresh it so it respects the new year range
+        try {
+          if (overlay && !overlay.hidden) {
+            const active = tabBtns.find(b => b.classList.contains('active'))?.dataset.kind || 'batting';
+            setTimeout(() => { renderLeaderboard(active); }, 20);
+          }
+        } catch (e) { console.warn('yearrange:change re-render failed', e); }
+      } catch (e) { console.warn('yearrange change handler failed', e); }
+      finally { try { toastHide(); } catch(e){} }
+    }, YEAR_DEBOUNCE_MS);
   });
 
   // initial choropleth + spikes

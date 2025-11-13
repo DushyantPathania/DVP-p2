@@ -1,21 +1,32 @@
-D3 Draggable Globe
+# DVP-p2
 
-This is a minimal example of a draggable, rotatable globe using D3's geo projection (orthographic) and canvas. It is adapted from the Observable example "Draggable Globe in D3".
+## Quick start — open the project
 
-Files:
-- `index.html` — HTML page that loads D3 and the script.
-- `main.js` — Implements the canvas globe: loads world topojson, draws land, graticule, sphere, and handles drag/zoom/auto-rotate.
+Open `index.html` in your web browser (double-click the file or choose "Open File...").
 
-How to open
-1. Open `e:/DVP p2/index.html` in your browser (double-click or use "Open with" from your editor).
-2. Drag the globe with mouse/touch. Use the mouse wheel to zoom.
+For a more robust local testing environment (recommended, since the app loads CSV files), serve the folder with a local web server. From PowerShell you can run:
 
-Notes
-- The page fetches world topojson from unpkg: `https://unpkg.com/world-atlas@2.0.2/world/110m.json`.
-- If you want offline data, download the topojson file and update the URL in `main.js`.
-- This example uses D3 v7 and topojson-client from CDNs.
+```powershell
+python -m http.server 8000
+# then open http://localhost:8000/index.html
+```
 
-Customization ideas
-- Color and shading tweaks.
-- Draw points/cities using `context` and `path` for coordinates.
-- Switch to a higher-resolution dataset (50m or custom GeoJSON).
+Or use VS Code Live Server extension to serve the project and open the page automatically.
+
+## What this project is
+
+This is a small client-side data visualization project that renders cricket venue-related maps and statistics from CSV datasets. It uses only static files (HTML, CSS, JavaScript) and CSV data found in the `data/csvs/` folder.
+
+Key files:
+
+- `index.html` — main page; open this to run the app.
+- `map.js` — map rendering and interaction logic.
+- `venue.js`, `venue-worker.js` — venue-specific behavior and worker logic.
+- `db.js` — CSV loading and data utilities.
+- `styles.css` — basic styling.
+- `data/csvs/` — CSV datasets (matches, innings, venues, venue_stats, etc.).
+
+## Notes
+
+- No build step or external dependencies are required; the app runs as static files in the browser.
+- If data fails to load when opening via the `file://` protocol, use a local server as described above to avoid CORS/file access issues.

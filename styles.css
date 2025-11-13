@@ -159,9 +159,67 @@ body.choro-on .country.has-venues { fill: inherit; }
 /* ===== Hamburger ========================================================= */
 .hamburger {
   position: fixed; left: 16px; top: 16px; width: 44px; height: 44px; border-radius: 10px;
-  display: grid; place-items: center; background: #134e4a; border: 1px solid rgba(255,255,255,0.2);
+  display: grid; place-items: center; background: transparent; border: none;
   cursor: pointer; z-index: 7;
 }
+
+/* ===== Instruction box (left side of globe/map) ======================== */
+.instructions{
+  position: fixed;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(320px, 28vw);
+  max-width: 360px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  z-index: 1202;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+.instructions .ins-title{ font-weight:700; margin-bottom:6px; color:var(--text); font-size:1rem }
+.instructions .ins-body{ color:var(--muted); font-size:0.9rem }
+.instructions .ins-hint{ margin-top:8px; font-size:0.86rem; color: #cfe8f5 }
+
+/* Hide instructions on landing to avoid overlap with the hero panel */
+body.landing .instructions{ display: none !important; }
+
+@media (max-width:640px){
+  .instructions{ left: 8px; width: calc(44vw); max-width: none; padding:10px; font-size:0.92rem }
+}
+
+/* Inline leaderboard icon / button inside instruction box */
+.ins-leaderboard{ display:flex; gap:10px; align-items:center; margin-top:8px }
+.ins-leaderboard .ins-icon{ width:20px; height:20px; color: var(--accent); flex:0 0 20px }
+.ins-leaderboard[role="button"]:focus{ outline: none; box-shadow: 0 0 0 4px rgba(255,138,0,0.08); border-radius:8px }
+.ins-leaderboard div{ line-height:1.12 }
+
+/* small hamburger used inside instruction box to visually match #menuBtn */
+.ins-leaderboard .ins-hamburger{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:36px;
+  height:36px;
+  border-radius:8px;
+  background: #134e4a;
+  border: 1px solid rgba(255,255,255,0.18);
+  flex: 0 0 36px;
+  padding:6px 8px;
+}
+.ins-leaderboard .ins-hamburger span{ display:block; width:22px; height:2px; background:var(--text); border-radius:2px; }
+.ins-leaderboard .ins-hamburger span + span{ margin-top:5px }
+.ins-leaderboard .ins-hamburger:focus{ outline:none; box-shadow:0 0 0 4px rgba(255,138,0,0.08); }
+
+/* Shared hamburger icon style (matches top-left .hamburger visuals but without fixed positioning) */
+.hamburger-icon{ display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; background:#134e4a; border:1px solid rgba(255,255,255,0.18); padding:6px 8px }
+.hamburger-icon span{ display:block; width:22px; height:2px; background:var(--text); border-radius:2px }
+.hamburger-icon span + span{ margin-top:5px }
+.hamburger-icon:focus{ outline:none; box-shadow:0 0 0 4px rgba(255,138,0,0.08) }
 .hamburger span {
   display: block; width: 22px; height: 2px; background: var(--text);
   transition: transform 200ms ease, opacity 200ms ease;
@@ -170,6 +228,12 @@ body.choro-on .country.has-venues { fill: inherit; }
 .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
 .hamburger.open span:nth-child(2) { opacity: 0; }
 .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ===== Leaderboard icon (bar chart) =================================== */
+.leaderboard-icon{ display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; background:#134e4a; border:1px solid rgba(255,255,255,0.18); padding:6px; color:var(--text); }
+.leaderboard-icon svg{ width:22px; height:22px; display:block; }
+.leaderboard-icon rect{ fill: currentColor; }
+.leaderboard-icon:focus{ outline:none; box-shadow:0 0 0 4px rgba(255,138,0,0.08); }
 
 /* ===== Legend (compact by default) ====================================== */
 .legend{

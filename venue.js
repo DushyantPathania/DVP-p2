@@ -604,6 +604,96 @@
         rows = [];
       }
 
+      // If the pre-aggregated `venue_stats` table has no rows for this
+      // venue/year range, fall back to joining per-innings tables to
+      // `matches` on match_id and synthesize per-format aggregates so the
+      // rest of the renderer (which expects rows) can operate unchanged.
+      if ((!rows || rows.length === 0)) {
+        try {
+          const likeExpr = aliasLikes.map(_ => `LOWER(m.venue_name) LIKE ?`).join(' OR ');
+          const paramsBase = [yrRange.min, yrRange.max, ...aliasLikes];
+
+          // Batting aggregates per-format
+          const batSql = `SELECT LOWER(COALESCE(m.format,'')) AS format,
+            SUM(CAST(bi.runs AS INT)) AS runs,
+            SUM(CAST(bi.balls AS INT)) AS balls,
+            SUM(CAST(bi.fours AS INT)) AS fours,
+            SUM(CAST(bi."6s" AS INT)) AS sixes,
+            COUNT(DISTINCT m.match_id) AS matches,
+            COUNT(*) AS innings_count,
+            AVG(CAST(bi.runs AS REAL)) AS batting_avg,
+            AVG(CASE WHEN CAST(bi.balls AS INT) > 0 THEN (CAST(bi.runs AS REAL)*100.0/CAST(bi.balls AS INT)) END) AS batting_sr,
+            AVG(CAST(bi.boundary_pct AS REAL)) AS boundary_pct
+          FROM batting_innings bi
+          LEFT JOIN matches m ON bi.match_id = m.match_id
+          WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeExpr})
+          GROUP BY LOWER(COALESCE(m.format,''))`;
+
+          const batRows = DB.queryAll(batSql, paramsBase) || [];
+
+          // Batting innings-by-number (for radar tooltip/innings_by_no)
+          const innSql = `SELECT LOWER(COALESCE(m.format,'')) AS format,
+            COALESCE(CAST(bi.innings_no AS INT),0) AS innings_no,
+            AVG(CAST(bi.runs AS INT)) AS avg_runs,
+            COUNT(*) AS cnt
+          FROM batting_innings bi
+          LEFT JOIN matches m ON bi.match_id = m.match_id
+          WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeExpr})
+          GROUP BY LOWER(COALESCE(m.format,'')), innings_no
+          ORDER BY LOWER(COALESCE(m.format,'')), innings_no`;
+
+          const innRows = DB.queryAll(innSql, paramsBase) || [];
+
+          // Bowling aggregates per-format
+          const bowlSql = `SELECT LOWER(COALESCE(m.format,'')) AS format,
+            AVG(CAST(bi.economy AS REAL)) AS bowling_econ,
+            AVG(CAST(bi.bowling_average AS REAL)) AS bowling_avg,
+            AVG(CAST(bi.bowling_strike_rate AS REAL)) AS bowling_sr,
+            SUM(CAST(bi.wickets AS INT)) AS wickets,
+            COUNT(DISTINCT m.match_id) AS matches,
+            COUNT(*) AS innings_count
+          FROM bowling_innings bi
+          LEFT JOIN matches m ON bi.match_id = m.match_id
+          WHERE CAST(substr(m.date,1,4) AS INT) BETWEEN ? AND ? AND (${likeExpr})
+          GROUP BY LOWER(COALESCE(m.format,''))`;
+
+          const bowlRows = DB.queryAll(bowlSql, paramsBase) || [];
+
+          // Organize results by format and synthesize rows similar to venue_stats
+          const batMap = Object.create(null);
+          batRows.forEach(r => { if (r && r.format) batMap[String(r.format).toLowerCase()] = r; });
+          const bowlMap = Object.create(null);
+          bowlRows.forEach(r => { if (r && r.format) bowlMap[String(r.format).toLowerCase()] = r; });
+          const innMap = Object.create(null);
+          innRows.forEach(r => { if (!r || !r.format) return; const k = String(r.format).toLowerCase(); innMap[k] = innMap[k] || []; innMap[k].push({ innings_no: r.innings_no, avg_runs: r.avg_runs, cnt: r.cnt }); });
+
+          const allKeys = Array.from(new Set([].concat(Object.keys(batMap), Object.keys(bowlMap))));
+          rows = allKeys.map(k => {
+            const b = batMap[k] || {};
+            const bo = bowlMap[k] || {};
+            return {
+              format: k,
+              matches: Number(b.matches || bo.matches || 0),
+              innings_count: Number(b.innings_count || bo.innings_count || 0),
+              runs: Number(b.runs || 0),
+              balls: Number(b.balls || 0),
+              fours: Number(b.fours || 0),
+              sixes: Number(b.sixes || 0),
+              batting_avg: b.batting_avg != null ? Number(b.batting_avg) : null,
+              batting_sr: b.batting_sr != null ? Number(b.batting_sr) : null,
+              boundary_pct: b.boundary_pct != null ? Number(b.boundary_pct) : null,
+              bowling_econ: bo.bowling_econ != null ? Number(bo.bowling_econ) : null,
+              bowling_avg: bo.bowling_avg != null ? Number(bo.bowling_avg) : null,
+              bowling_sr: bo.bowling_sr != null ? Number(bo.bowling_sr) : null
+            };
+          });
+          // keep innings-by-no available for merging later
+          try { panel._fallback_innings = innMap; } catch(e) { panel._fallback_innings = null; }
+        } catch (fbErr) {
+          console.warn('fallback per-innings aggregation failed', fbErr);
+        }
+      }
+
   // store last fetched rows so Evolution controls can re-render without re-query
   try { panel._lastRows = rows; panel._lastYrRange = yrRange; panel._lastFormat = format; } catch(e){}
   // Draw evolution heatmap from raw rows for the selected yrRange and format
@@ -667,6 +757,20 @@
           _raw_agg: g
         };
       });
+
+      // If we synthesized per-innings aggregates from the fallback path,
+      // merge innings-by-number into the byFormat objects so the radar
+      // renderer / tooltips can use them.
+      try {
+        const fb = panel._fallback_innings || null;
+        if (fb) {
+          Object.keys(fb).forEach(k => {
+            const norm = (k || '').toLowerCase().includes('test') ? 'test' : (k || '').toLowerCase().includes('odi') ? 'odi' : ((k || '').toLowerCase().includes('t20') ? 't20i' : null);
+            if (!norm) return;
+            if (byFormat[norm]) byFormat[norm].innings_by_no = (fb[k] || []).map(x => ({ innings_no: x.innings_no, avg_runs: Number(x.avg_runs || 0), count: Number(x.cnt || 0) }));
+          });
+        }
+      } catch(e) { /* non-fatal */ }
 
       svgEl._metrics = { byFormat }; svgEl.dataset.metrics = JSON.stringify({ byFormat });
       try { const diag = panel.querySelector('.venue-diag'); if (diag) diag.textContent = JSON.stringify(svgEl._metrics, null, 2); } catch(e){}
@@ -898,6 +1002,22 @@
       // dispatch open event early so global transient loader (map-level) hides
       // even if subsequent data fetching faults or takes long.
       window.dispatchEvent(new CustomEvent("venuewindow:open"));
+      // Ensure Radar tab is active and visible when the panel opens.
+      try {
+        // Radar button is the first .venue-tab by construction
+        const tabRadarBtn = panel.querySelector('.venue-tab');
+        const tabBtns = Array.from(panel.querySelectorAll('.venue-tab'));
+        const tabEvoBtn = tabBtns.find(b => (b.textContent||'').trim().toLowerCase() === 'evolution');
+        if (tabRadarBtn) tabRadarBtn.setAttribute('aria-pressed', 'true');
+        if (tabEvoBtn) tabEvoBtn.setAttribute('aria-pressed', 'false');
+        // Show radar container, hide evolution container and reveal legend
+        const radarWrapEl = panel.querySelector('div > svg[data-role="radar"]')?.parentNode || null;
+        const evoWrapEl = panel.querySelector('.venue-evolution');
+        const legendEl = panel.querySelector('.venue-legend');
+        if (radarWrapEl) radarWrapEl.style.display = 'block';
+        if (evoWrapEl) evoWrapEl.style.display = 'none';
+        try { if (legendEl) legendEl.classList.remove('hidden'); } catch(_){}
+      } catch (e) { /* non-fatal */ }
     } catch (e) {
       console.warn('VenueWindow.open: UI show failed', e);
     }

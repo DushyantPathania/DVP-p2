@@ -76,7 +76,7 @@ const DB = {
       const cached = await idbGet(cacheKey);
       if (cached && cached.byteLength) {
         db = new SQL.Database(new Uint8Array(cached));
-        console.info("[DB] loaded from IndexedDB cache:", cacheKey);
+        // cache hit (info removed)
         return;
       }
     } catch (e) {
@@ -92,7 +92,7 @@ const DB = {
         const buf = await res.arrayBuffer();
         await idbPut(cacheKey, buf);
         db = new SQL.Database(new Uint8Array(buf));
-        console.info("[DB] fetched & cached:", url, "→", cacheKey);
+        // fetch logged at WARN level only on failure; successful fetch info suppressed
         return;
       } catch (e) {
         lastErr = e;
@@ -116,7 +116,7 @@ const DB = {
   async clearCache(prefix = "cricket.db::") {
     const keys = await idbKeys(prefix);
     await Promise.all(keys.map(idbDelete));
-    console.info("[DB] cache cleared:", keys);
+    // cache cleared (info removed)
   }
 };
 

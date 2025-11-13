@@ -18,13 +18,18 @@
     <div class="hero-left">
       <h1>Global Cricket Insights</h1>
       <p>
-        Explore <strong>regional dominance</strong> and <strong>venue &amp; format evolution</strong>
-        across ODI, T20I and Test cricket (2000–2025).
+        Explore global cricket data from 2000–2025 with interactive visualisations and per-venue analysis.
+        This project loads match and innings CSV data into an in-browser SQL database, computes
+        metrics (home win %, matches hosted, venue batting/bowling aggregates, etc.), and
+        visualises them on a 2D map or a 3D globe.
       </p>
       <ul class="hero-points">
-        <li>Choropleth: <em>Home win %</em> by host country</li>
-        <li>Win spikes: <em>matches hosted</em> (height)</li>
-        <li>Year filter (bottom) · 2D/3D toggle (top-right) · Click a country for venues</li>
+        <li>Data: CSVs located in <code>data/csvs/</code> (matches, venues, innings, batting_innings, bowling_innings, venue_stats).</li>
+        <li>Processing: in-browser SQL (sql.js) powered by <code>db.js</code> plus a dedicated web worker (<code>venue-worker.js</code>) for heavy venue calculations.</li>
+        <li>Visuals: choropleth of <em>home win %</em>, "win spike" markers sized by matches hosted, and per-venue detail panels with innings-level breakdowns.</li>
+        <li>Interactions: year range slider, 2D/3D globe toggle, tilt control, click a country to list venues, and a Leaderboard overlay for batting and bowling stats.</li>
+        <li>Tech stack: D3, TopoJSON, sql.js, Web Workers, and vanilla HTML/CSS/JS. To run, open <code>index.html</code> in a browser or serve the folder with any static server.
+        </li>
       </ul>
       <button id="enterBtn" class="cta">Explore data</button>
     </div>
@@ -37,7 +42,7 @@
 
   <!-- top-right view toggle (user-provided markup) + dynamic text -->
   <div class="toggle-wrap" aria-hidden="true">
-  <div id="toggleText" class="toggle-text" aria-hidden="true">Global Cricket Insights — explore regional dominance and venue evolution across ODI, T20I and Test cricket (2000–2025). Click the control to switch between 3D globe and 2D map views.</div>
+  <div id="toggleText" class="toggle-text" aria-hidden="true">Global Cricket Insights — interactive analytics for international cricket (2000–2025). Loads local CSVs into an in-browser SQL DB, computes home win % and venue metrics, produces leaderboards, and renders choropleth, win spikes and per-venue panels. Use the control to switch 3D globe / 2D map; use the year slider to filter years; click a country to view its venues and leaderboards.</div>
     <div class="toggle">
       <input type="checkbox" id="btn">
       <label for="btn">

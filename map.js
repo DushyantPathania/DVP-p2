@@ -246,6 +246,18 @@
   const countries    = topojson.feature(worldData, worldData.objects.countries).features;
   const boundaryMesh = topojson.mesh(worldData, worldData.objects.countries, (a, b) => a !== b);
 
+  // ---------------------------------------------------------------------------
+  // map.js - high level overview (humanized)
+  // This file contains the visualization glue that renders a globe and a
+  // flat map of countries, overlays 'spikes' (vertical bars) for match
+  // counts, proportional bubbles for match-hosting, and directional flow
+  // arcs showing origins → host relationships. The UI controls and legends
+  // live in the same file for convenience; functions are intentionally
+  // structured to separate data-aggregation (compute*) from drawing (draw*),
+  // and position updates (update*). When editing, prefer to change data
+  // transforms first and keep DOM binding logic simple.
+  // ---------------------------------------------------------------------------
+
   /* ------------------------ Country Name Helpers --------------------------- */
   const ALIAS_TO_CANON_MAP = new Map([
     ["united states of america","united states"],
@@ -392,7 +404,7 @@
     // Sanity logs
     try {
       const tnames = DB.queryAll("SELECT name FROM sqlite_master WHERE type='table'");
-      console.info("[DB] tables:", tnames.map(r => r.name));
+      // removed verbose diagnostic logging
     } catch (e) {
       console.warn("[DB] table introspection failed:", e);
     }
@@ -496,7 +508,7 @@
       }
     }
 
-    console.info("[CHORO] matches-like tables:", out.map(t => t.name));
+    // removed verbose diagnostic logging
     return out;
   }
 
@@ -583,7 +595,7 @@
 
     choroByCountry = agg;
     choroActive = agg.size > 0;
-  try { console.info('[CHORO] choroByCountry size:', choroByCountry.size); const samp = Array.from(choroByCountry.entries()).slice(0,6).map(([k,v])=>({k,v: {matches:v.matches, homeWins:v.homeWins, winPct: v.winPct}})); console.info('[CHORO] sample:', samp); } catch(e){}
+  // debug info removed
 
     // compute max matches for selected format
     const maxMatches = d3.max(Array.from(agg.values()), d => {
@@ -604,11 +616,11 @@
       drawBubbles();
       updateBubbleLegend();
     } catch (e) { console.warn('flow/bubble computation failed', e); }
-    console.info("[CHORO] countries:", agg.size, "max matches:", maxMatches);
+    // removed verbose diagnostic logging
   }
 
   function applyChoropleth(){
-    if (!choroActive) { console.info('[CHORO] applyChoropleth called but choroActive=false'); return; }
+    if (!choroActive) { return; }
     gCountries.selectAll("path.country")
       .style("fill", d => {
           const key = canonicalMapName(d.properties?.name || "");
@@ -813,7 +825,16 @@
   }
 
   /* -------------------------- Flows & Bubbles --------------------------- */
-  // computeFlows: read lightweight CSV (matches) and aggregate origin->host counts
+  /*
+   * computeFlows(yearMin, yearMax)
+   * - Purpose: load match records (prefer CSV from GitHub, fall back to DB),
+   *   then aggregate origin -> host pair counts and per-host totals used by
+   *   the flow arcs and map bubbles.
+   * - Inputs: yearMin, yearMax (inclusive)
+   * - Outputs (module-scope): flowData (array), bubbleData (array),
+   *   flowWidthScale, bubbleRadiusScale, and countryColors (map of origin->color)
+   * - Notes: Keeps network/DB failures graceful and skips neutral/no-result matches.
+   */
   async function computeFlows(yearMin, yearMax){
     try{
       let rows = [];
@@ -937,11 +958,8 @@
                 try { renderFlowFilterUI(); } catch(e) { /* ignore UI population errors */ }
               }
               // Diagnostic: log how many origin colors were assigned and show a small sample
-              try {
-                console.info('[FLOWS] countryColors assigned:', countryColors.size);
-                const sample = Array.from(countryColors.entries()).slice(0,8).map(([k,v]) => ({origin:k,color:v}));
-                console.info('[FLOWS] countryColors sample:', sample);
-              } catch(e) { /* ignore diag failures */ }
+              // removed verbose diagnostic logging
+              try { /* noop: skipped diagnostics */ } catch(e) { /* ignore diag failures */ }
           } catch(e) { console.warn('flow color mapping failed', e); }
     }catch(e){ console.warn('computeFlows failed', e); flowData = []; bubbleData = []; }
   }
@@ -950,9 +968,17 @@
   let flowWidthScale = d3.scaleSqrt().domain([0,1]).range([0.6,6]);
   let bubbleRadiusScale = d3.scaleSqrt().domain([0,1]).range([2,18]);
 
+  /*
+   * drawFlowArcs()
+   * - Binds `flowData` into SVG path.flow elements (geodesic LineString).
+   * - Respects `flowVisible` and `selectedFlowCountries` filter state.
+   * - Interactivity: hover pauses globe spin and shows tooltip; click focuses host.
+   * - Stroke width encodes match count via flowWidthScale; stroke color uses
+   *   per-origin color (countryColors) when available.
+   */
   function drawFlowArcs(){
     // flows are a globe-only visual
-    if (!flowVisible) { gFlowArcs.selectAll('path.flow').remove(); console.info('[FLOWS] flowVisible=false, removed arcs'); return; }
+  if (!flowVisible) { gFlowArcs.selectAll('path.flow').remove(); return; }
     // Apply country filter: if selectedFlowCountries is empty -> show all origins; otherwise filter
     const data = flowData.filter(d => {
       // selectedFlowCountries: null => all, Set(size=0) => none, Set(size>0) => those
@@ -999,16 +1025,17 @@
   d3.select(this).attr('stroke', colBase);
       }catch(e){ d3.select(this).attr('d', null); }
     });
-    console.info('[FLOWS] drawFlowArcs created', data.length || 0, 'arcs');
-    // Diagnostic: after creating arcs, inspect the first few DOM nodes to see actual stroke attr
-    try {
-      const nodes = Array.from(gFlowArcs.node().querySelectorAll('path.flow')).slice(0,6);
-      const attrs = nodes.map(n => ({d: n.getAttribute('d') ? 'yes' : 'no', strokeAttr: n.getAttribute('stroke'), strokeStyle: window.getComputedStyle(n).stroke}));
-      console.info('[FLOWS] arc DOM sample attrs:', attrs);
-    } catch(e) { /* ignore */ }
+    // Diagnostic information removed
+    try { /* previously used for runtime diagnostics; removed */ } catch(e) { /* ignore */ }
     updateFlowPositions();
   }
 
+  /*
+   * updateFlowPositions()
+   * - Recomputes arc geometry when the projection/rotation/zoom changes.
+   * - Culls arcs not on the visible hemisphere in globe mode for performance.
+   * - Called from redrawAll() when projection or mode changes.
+   */
   function updateFlowPositions(){
     // respect flow visibility: if flows are turned off, keep them hidden
     if (!flowVisible) { try { gFlowArcs.selectAll('path.flow').style('display','none'); } catch(e){}; return; }
@@ -1035,6 +1062,12 @@
     });
   }
 
+  /*
+   * drawBubbles()
+   * - Renders proportional bubbles on the flat 2D map using `bubbleData`.
+   * - Radius is driven by bubbleRadiusScale; bubbles are hidden in globe mode.
+   * - Clicking a bubble focuses the host country.
+   */
   function drawBubbles(){
     const sel = gBubbles.selectAll('circle.bubble').data(bubbleData, d => d.key);
     sel.exit().remove();
@@ -1049,10 +1082,15 @@
       const p = projection([d.lon,d.lat]);
       if (p) d3.select(this).attr('cx', p[0]).attr('cy', p[1]);
     });
-    console.info('[BUBBLES] drawBubbles created', bubbleData.length || 0, 'bubbles');
+  // removed verbose diagnostic logging
     updateBubblePositions();
   }
 
+  /*
+   * updateBubblePositions()
+   * - Repositions bubbles for the current projection/zoom.
+   * - In globe mode bubbles are hidden (map-only visual).
+   */
   function updateBubblePositions(){
     if (mode === 'globe') { gBubbles.selectAll('circle.bubble').style('display','none'); return; }
     gBubbles.selectAll('circle.bubble').each(function(d){
@@ -1064,6 +1102,11 @@
   }
 
   // Render the flow filter UI (populate the custom dropdown list with colored options)
+  /*
+   * renderFlowFilterUI()
+   * - Populates the custom dropdown that lists origin countries with color
+   *   swatches. Manages checkbox wiring but does not persist selection.
+   */
   function renderFlowFilterUI(){
     const container = document.getElementById('flowCountryItems');
     const btn = document.getElementById('flowCountryBtn');
@@ -1116,6 +1159,12 @@
     updateFlowDropdownButton();
   }
 
+  /*
+   * updateFlowSelectionFromUI()
+   * - Reads checkbox state from the flow country UI and updates
+   *   `selectedFlowCountries` (null => all, Set() => none, Set(items) => selection).
+   * - Triggers UI label update and redraw of arcs.
+   */
   function updateFlowSelectionFromUI(){
     const container = document.getElementById('flowCountryItems');
     const selectAll = document.getElementById('flowSelectAll');
@@ -1138,6 +1187,10 @@
     drawFlowArcs();
   }
 
+  /*
+   * updateFlowDropdownButton()
+   * - Updates the main dropdown button label to show current selection count.
+   */
   function updateFlowDropdownButton(){
     const btn = document.getElementById('flowCountryBtn');
     const container = document.getElementById('flowCountryItems');
@@ -1152,6 +1205,12 @@
 
   /* ------------------------- Focus helpers (globe / map) ------------------ */
   // Smoothly rotate the globe to center on the feature's centroid
+  /*
+   * focusGlobeOn(feature)
+   * - Animates rotation then zooms the globe to center a given GeoJSON feature.
+   * - Returns a Promise that resolves when transitions finish.
+   * - Note: projection.rotate uses [lambda, phi, gamma] convention.
+   */
   function focusGlobeOn(feature){
     return new Promise((resolve) => {
       try{
@@ -1186,6 +1245,12 @@
   }
 
   // Zoom & pan the flat map to fit the feature into view
+  /*
+   * focusMapOn(feature)
+   * - Uses D3 zoom transform to center and scale the flat map so the
+   *   supplied feature fits comfortably within the viewport.
+   * - Returns a Promise that resolves when the zoom transition ends.
+   */
   function focusMapOn(feature){
     return new Promise((resolve) => {
       try{
@@ -1205,6 +1270,12 @@
   }
 
   // Create legend UI using D3 and place it to the right, below the toggle
+  /*
+   * createLegendUI()
+   * - Builds the right-side legend (choropleth gradient, spike sample,
+   *   flows control, and bubble metric). Returns the created DOM node.
+   * - Keeps DOM creation local to this function to simplify removal/rebuild.
+   */
   function createLegendUI(){
     // Remove any existing legend created earlier
     d3.selectAll('.legend').remove();
